@@ -198,6 +198,8 @@ npm version patch          # or minor / major. Commits and tags, e.g. v2.0.1
 git push --follow-tags
 ```
 
+Or bump the version in a pull request, merge it, then run the **Build** workflow by hand from the Actions tab on `main` with **release** ticked. That creates the tag for you.
+
 Pushing a `v*` tag runs the **Build** workflow (`.github/workflows/build.yml`), which lints, tests, builds `PC-Live-Dash.exe`, smoke-tests it on Windows, and publishes a GitHub Release with the zip, the bare .exe and SHA-256 checksums. The workflow refuses a tag that does not match the `package.json` version. It also runs on every pull request and push to `main`, where the build is kept as a workflow artifact without a release.
 
 To build the .exe locally:
