@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PC Live Dashboard — Real-time hardware monitoring with a futuristic interface. Monitor CPU, RAM, GPU, Network, Processes, and more.">
+    <meta name="theme-color" content="#0a0e1a">
+    <title>PC Live Dashboard — Real-Time System Monitor</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+    <!-- Styles -->
+    <link rel="stylesheet" href="styles.css?v=20260702_v2">
+</head>
+<body>
+    <!-- Background Particle Canvas -->
+    <canvas id="particles-canvas"></canvas>
+
+    <!-- Connection Status Bar -->
+    <div id="connection-bar" class="connection-bar disconnected">
+        <div class="connection-bar-fill"></div>
+    </div>
+
+    <!-- Main Dashboard -->
+    <div class="dashboard">
+
+        <!-- ═══════════════ SYSTEM INFO BAR ═══════════════ -->
+        <div class="system-bar card" id="system-bar">
+            <div class="system-bar-left">
+                <div class="system-logo">
+                    <span class="logo-icon">⬡</span>
+                    <span class="logo-text">PC LIVE DASH</span>
+                </div>
+                <div class="system-info-items">
+                    <div class="sys-info-item" id="sys-hostname">
+                        <span class="sys-label">HOST</span>
+                        <span class="sys-value mono" id="val-hostname">—</span>
+                    </div>
+                    <div class="sys-info-item" id="sys-os">
+                        <span class="sys-label">OS</span>
+                        <span class="sys-value mono" id="val-os">—</span>
+                    </div>
+                    <div class="sys-info-item" id="sys-arch">
+                        <span class="sys-label">ARCH</span>
+                        <span class="sys-value mono" id="val-arch">—</span>
+                    </div>
+                    <div class="sys-info-item" id="sys-uptime">
+                        <span class="sys-label">UPTIME</span>
+                        <span class="sys-value mono" id="val-uptime">—</span>
+                    </div>
+                    <div class="sys-info-item" id="sys-cpu-model">
+                        <span class="sys-label">CPU</span>
+                        <span class="sys-value mono" id="val-cpu-model">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="system-bar-right">
+                <div class="datetime-display">
+                    <span class="mono" id="val-datetime">—</span>
+                </div>
+                <button class="settings-btn" id="settings-btn">⚙️ Settings</button>
+                <div class="connection-status" id="connection-status">
+                    <span class="status-dot disconnected" id="status-dot"></span>
+                    <span class="status-text" id="status-text">Connecting...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- ═══════════════ MAIN GRID ═══════════════ -->
+        <div class="dashboard-grid">
+
+            <!-- ─────── CPU Panel ─────── -->
+            <div class="card" id="cpu-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🔲</span> CPU
+                    </div>
+                    <div class="card-badge badge badge-cyan" id="cpu-badge">0%</div>
+                </div>
+                <div class="card-body">
+                    <div class="gauge-and-stats" data-component="cpu-gauge">
+                        <div class="gauge-container">
+                            <div class="gauge-ring gauge-cyan" id="cpu-gauge">
+                                <div class="gauge-inner">
+                                    <span class="gauge-value mono" id="cpu-gauge-value">0</span>
+                                    <span class="gauge-unit">%</span>
+                                </div>
+                            </div>
+                            <div class="gauge-label">Overall Load</div>
+                        </div>
+                        <div class="stat-grid stat-grid-2" data-component="cpu-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">SPEED</span>
+                                <span class="stat-value mono" id="cpu-speed">— GHz</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">TEMP</span>
+                                <span class="stat-value mono" id="cpu-temp">— °C</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">CORES</span>
+                                <span class="stat-value mono" id="cpu-cores">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">THREADS</span>
+                                <span class="stat-value mono" id="cpu-threads">—</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="chart-container chart-sm" data-component="cpu-chart">
+                        <canvas id="cpu-chart"></canvas>
+                    </div>
+                    <div class="core-bars" id="cpu-core-bars" data-component="cpu-corebars">
+                        <!-- Dynamically populated per-core bars -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── RAM Panel ─────── -->
+            <div class="card" id="ram-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🧠</span> Memory
+                    </div>
+                    <div class="card-badge badge badge-violet" id="ram-badge">0%</div>
+                </div>
+                <div class="card-body">
+                    <div class="gauge-and-stats" data-component="ram-gauge">
+                        <div class="gauge-container">
+                            <div class="gauge-ring gauge-violet" id="ram-gauge">
+                                <div class="gauge-inner">
+                                    <span class="gauge-value mono" id="ram-gauge-value">0</span>
+                                    <span class="gauge-unit">%</span>
+                                </div>
+                            </div>
+                            <div class="gauge-label">Usage</div>
+                        </div>
+                        <div class="stat-grid stat-grid-2" data-component="ram-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">USED</span>
+                                <span class="stat-value mono" id="ram-used">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">TOTAL</span>
+                                <span class="stat-value mono" id="ram-total">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">FREE</span>
+                                <span class="stat-value mono" id="ram-free">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">CACHED</span>
+                                <span class="stat-value mono" id="ram-cached">—</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="swap-bar-container" data-component="ram-swap">
+                        <div class="swap-label">
+                            <span>Swap</span>
+                            <span class="mono" id="swap-info">—</span>
+                        </div>
+                        <div class="progress-bar progress-violet">
+                            <div class="progress-fill" id="swap-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="ram-chart-container chart-container chart-sm" data-component="ram-chart">
+                        <canvas id="ram-history-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+
+
+            <!-- ─────── Disk Usage Panel ─────── -->
+            <div class="card" id="disk-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">💾</span> Storage
+                    </div>
+                    <div class="card-badge badge badge-amber" id="disk-io-badge">—</div>
+                </div>
+                <div class="card-body">
+                    <div class="disk-list" id="disk-list" data-component="disk-list">
+                        <!-- Dynamically populated disk items -->
+                        <div class="disk-placeholder">
+                            <span class="text-muted">Scanning drives...</span>
+                        </div>
+                    </div>
+                    <div class="disk-io-stats" id="disk-io-stats" data-component="disk-io">
+                        <div class="stat-item">
+                            <span class="stat-label">READ</span>
+                            <span class="stat-value mono" id="disk-read-speed">—</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-label">WRITE</span>
+                            <span class="stat-value mono" id="disk-write-speed">—</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Temperature Panel ─────── -->
+            <div class="card" id="temp-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🌡️</span> Temperatures
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="temp-grid" id="temp-grid">
+                        <!-- Dynamically populated temperature items -->
+                        <div class="temp-placeholder">
+                            <span class="text-muted">Reading sensors...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Fans Panel ─────── -->
+            <div class="card" id="fans-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🌀</span> Fans
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="temp-grid" id="fans-grid">
+                        <!-- Dynamically populated fan items -->
+                        <div class="temp-placeholder">
+                            <span class="text-muted">Reading fan speed...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Battery Panel ─────── -->
+            <div class="card" id="battery-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🔋</span> Battery
+                    </div>
+                    <div class="card-badge badge" id="battery-badge">—</div>
+                </div>
+                <div class="card-body">
+                    <div class="battery-display" id="battery-display">
+                        <div class="battery-icon-container" data-component="battery-icon">
+                            <div class="battery-icon" id="battery-icon">
+                                <div class="battery-level" id="battery-level" style="width: 0%"></div>
+                                <div class="battery-tip"></div>
+                            </div>
+                            <span class="battery-percent mono" id="battery-percent">—</span>
+                        </div>
+                        <div class="stat-grid stat-grid-2" data-component="battery-stats">
+                            <div class="stat-item">
+                                <span class="stat-label">STATUS</span>
+                                <span class="stat-value mono" id="battery-status">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">REMAINING</span>
+                                <span class="stat-value mono" id="battery-remaining">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">CYCLES</span>
+                                <span class="stat-value mono" id="battery-cycles">—</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">HEALTH</span>
+                                <span class="stat-value mono" id="battery-health">—</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Processes Table ─────── -->
+            <div class="card span-full" id="processes-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">📋</span> Processes
+                    </div>
+                    <div class="card-header-right" data-component="proc-search">
+                        <span class="process-count mono" id="process-count">0 processes</span>
+                        <input type="text" class="table-search" id="process-search" placeholder="🔍  Search processes..." autocomplete="off">
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-container" id="process-table-container" data-component="proc-table">
+                        <table class="data-table" id="process-table">
+                            <thead>
+                                <tr>
+                                    <th class="sortable" data-sort="pid" id="th-pid">PID</th>
+                                    <th class="sortable" data-sort="name" id="th-name">Name</th>
+                                    <th class="sortable active-sort" data-sort="cpu" id="th-cpu">CPU %</th>
+                                    <th class="sortable" data-sort="mem" id="th-mem">MEM %</th>
+                                    <th class="sortable" data-sort="memRss" id="th-memrss">MEM (RSS)</th>
+                                    <th data-sort="state" id="th-state">State</th>
+                                    <th data-sort="user" id="th-user">User</th>
+                                </tr>
+                            </thead>
+                            <tbody id="process-tbody">
+                                <tr>
+                                    <td colspan="7" class="text-muted table-placeholder">Loading processes...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Running Apps ─────── -->
+            <div class="card" id="apps-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">🖥️</span> Active Apps
+                    </div>
+                    <div class="card-badge badge badge-green" id="apps-count-badge">0</div>
+                </div>
+                <div class="card-body">
+                    <div class="apps-list" id="apps-list">
+                        <div class="apps-placeholder">
+                            <span class="text-muted">Scanning applications...</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ─────── Services ─────── -->
+            <div class="card span-2" id="services-panel">
+                <div class="card-header">
+                    <div class="card-title">
+                        <span class="card-icon">⚙️</span> Services
+                    </div>
+                    <div class="card-header-right" data-component="svc-filters">
+                        <span class="service-count mono" id="service-count">0 services</span>
+                        <div class="service-filters" id="service-filters">
+                            <button class="filter-btn active" data-filter="all" id="filter-all">All</button>
+                            <button class="filter-btn" data-filter="running" id="filter-running">Running</button>
+                            <button class="filter-btn" data-filter="stopped" id="filter-stopped">Stopped</button>
+                        </div>
+                        <input type="text" class="table-search" id="service-search" placeholder="🔍  Search services..." autocomplete="off">
+                    </div>
+                </div>
+                <div class="card-body">
+                    <div class="table-container" id="service-table-container" data-component="svc-table">
+                        <table class="data-table" id="service-table">
+                            <thead>
+                                <tr>
+                                    <th id="th-svc-name">Service Name</th>
+                                    <th id="th-svc-status">Status</th>
+                                    <th id="th-svc-startup">Startup</th>
+                                    <th id="th-svc-cpu">CPU %</th>
+                                    <th id="th-svc-mem">MEM %</th>
+                                </tr>
+                            </thead>
+                            <tbody id="service-tbody">
+                                <tr>
+                                    <td colspan="5" class="text-muted table-placeholder">Loading services...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+        </div><!-- /dashboard-grid -->
+
+        <!-- Settings Sidebar Overlay -->
+        <div class="settings-overlay" id="settings-overlay"></div>
+
+        <!-- Settings Sidebar -->
+        <div class="settings-sidebar" id="settings-sidebar">
+            <div class="settings-sidebar-header">
+                <h2>⚙️ Dashboard Settings</h2>
+                <div style="display: flex; gap: 8px;">
+                    <button class="settings-close-btn" id="settings-reset-btn" style="border-color: rgba(239, 68, 68, 0.4); color: var(--accent-red);">Reset</button>
+                    <button class="settings-close-btn" id="settings-close-btn">✕ Close</button>
+                </div>
+            </div>
+            <div class="settings-tabs">
+                <button class="settings-tab active" data-tab="layout">Layout</button>
+                <button class="settings-tab" data-tab="components">Components</button>
+                <button class="settings-tab" data-tab="groups">Groups</button>
+            </div>
+            <div class="settings-tab-content">
+                <!-- Layout Tab -->
+                <div class="settings-tab-panel active" id="tab-layout">
+                    <!-- Dynamically populated -->
+                </div>
+                <!-- Components Tab -->
+                <div class="settings-tab-panel" id="tab-components">
+                    <!-- Dynamically populated -->
+                </div>
+                <!-- Groups Tab -->
+                <div class="settings-tab-panel" id="tab-groups">
+                    <div class="group-create-row">
+                        <input type="text" id="group-name-input" placeholder="Group name...">
+                        <button id="group-create-btn">+ Create</button>
+                    </div>
+                    <div id="group-list"></div>
+                </div>
+            </div>
+            <div class="lock-toggle">
+                <label>
+                    <input type="checkbox" id="lock-layout-cb">
+                    🔒 Lock Layout
+                </label>
+            </div>
+        </div>
+    </div><!-- /dashboard -->
+
+    <!-- Scripts -->
+    <script src="particles.js"></script>
+    <script src="charts.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
