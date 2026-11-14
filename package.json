@@ -1,6 +1,6 @@
 {
   "name": "pc-live-dash",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Futuristic real-time PC hardware monitoring dashboard",
   "main": "server.js",
   "scripts": {

@@ -438,14 +438,18 @@ async function collectMediumData() {
     try {
       const nvGpuStats = await nvidiaPromise;
       if (nvGpuStats && nvGpuStats.length > 0) {
+        // Each nvidia-smi row is used once, so two identical cards each get
+        // their own readings instead of both showing the first card's.
+        const unused = nvGpuStats.slice();
         graphics.controllers.forEach((gpu) => {
           // Find matching nvidia-smi stats by checking model/name overlap
-          const match = nvGpuStats.find(stat => 
+          const index = unused.findIndex(stat => 
             gpu.model && (
               stat.name.toLowerCase().includes(gpu.model.toLowerCase()) ||
               gpu.model.toLowerCase().includes(stat.name.toLowerCase())
             )
           );
+          const match = index === -1 ? null : unused.splice(index, 1)[0];
           if (match) {
             gpu.utilizationGpu = match.utilizationGpu !== null ? match.utilizationGpu : gpu.utilizationGpu;
             gpu.memoryUsed = match.memoryUsed !== null ? match.memoryUsed : gpu.memoryUsed;

@@ -1600,8 +1600,8 @@
             container.innerHTML = controllers.map((gpu, i) => `
                 <div class="card gpu-card" id="gpu-card-${i}">
                     <div class="gpu-card-header">
-                        <span class="gpu-name">${escapeHtml(gpu.vendor || '')} ${escapeHtml(gpu.model || 'Unknown GPU')}</span>
-                        <span class="badge ${gpu.utilizationGpu != null ? 'badge-green' : 'badge-muted'}">${gpu.utilizationGpu != null ? `${Math.round(gpu.utilizationGpu)}%` : 'N/A'}</span>
+                        <span class="gpu-name">${escapeHtml(formatGpuName(gpu))}</span>
+                        <span class="badge badge-muted" id="gpu-badge-${i}">N/A</span>
                     </div>
                     <div class="gpu-card-body">
                         <div class="gpu-stats-row">
@@ -1636,11 +1636,11 @@
                         <div class="gpu-charts-row">
                             <div class="chart-container chart-xs">
                                 <div class="chart-label-mini">GPU Utilization</div>
-                                <canvas id="gpu-chart-${i}"></canvas>
+                                <div class="chart-canvas-wrap"><canvas id="gpu-chart-${i}"></canvas></div>
                             </div>
                             <div class="chart-container chart-xs">
                                 <div class="chart-label-mini">VRAM Usage</div>
-                                <canvas id="gpu-vram-chart-${i}"></canvas>
+                                <div class="chart-canvas-wrap"><canvas id="gpu-vram-chart-${i}"></canvas></div>
                             </div>
                         </div>
                     </div>
@@ -1669,10 +1669,19 @@
                 if (resizeObserver) resizeObserver.observe(card);
             });
             restoreDynamicCardsLayout();
-        } else {
-            // Update existing GPU cards
+        }
+
+        // Update the readings. This also runs right after the cards are built,
+        // so the first sample is plotted instead of being dropped.
+        {
             controllers.forEach((gpu, i) => {
+                const hasUtil = gpu.utilizationGpu != null;
                 const util = Math.round(gpu.utilizationGpu || 0);
+                const badge = $(`gpu-badge-${i}`);
+                if (badge) {
+                    badge.textContent = hasUtil ? `${util}%` : 'N/A';
+                    badge.className = `badge ${hasUtil ? 'badge-green' : 'badge-muted'}`;
+                }
                 updateGauge(`gpu-gauge-${i}`, `gpu-gauge-val-${i}`, util, 'green');
                 setText(`gpu-vram-${i}`, formatVram(gpu));
                 setText(`gpu-temp-${i}`, gpu.temperatureGpu != null ? `${Math.round(gpu.temperatureGpu)} °C` : 'N/A');
@@ -2117,6 +2126,17 @@
 
     function formatVram(gpu) {
         return gpu.memoryUsed != null ? `${gpu.memoryUsed}/${gpu.memoryTotal} MB` : 'N/A';
+    }
+
+    // "NVIDIA" + "NVIDIA GeForce RTX 4070" would repeat the vendor, so the
+    // vendor is only added when the model name does not already carry it.
+    function formatGpuName(gpu) {
+        const model = (gpu.model || '').trim();
+        const vendor = (gpu.vendor || '').trim();
+        if (!model) return vendor ? `${vendor} GPU` : 'Unknown GPU';
+        if (!vendor) return model;
+        const firstWord = vendor.split(/\s+/)[0].toLowerCase();
+        return model.toLowerCase().includes(firstWord) ? model : `${vendor} ${model}`;
     }
 
     function formatFan(gpu) {
