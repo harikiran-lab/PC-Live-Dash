@@ -8,7 +8,19 @@
   LAN access and the port are changed through the server's local settings
   API. The server saves them to config.json, so they survive restarts.
   "Start with Windows" is stored in the current user's Run registry key.
+
+  Only one tray app runs at a time. Starting it again passes the request on
+  to the running one:
+
+    -OpenDashboard   open the dashboard in the browser
+    -Settings        open the settings window
+    -Quit            stop the running tray app (and the server it started)
 #>
+param(
+    [switch]$OpenDashboard,
+    [switch]$Settings,
+    [switch]$Quit
+)
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -61,9 +73,9 @@ function Get-ErrorText($ErrorRecord) {
 function Start-DashServer {
     if (Get-DashSettings) { return $true }   # already running, e.g. as the service
 
-    # A release download has PC-Live-Dash.exe next to this script. A source
-    # checkout runs server.js with Node.js.
-    $exe = Join-Path $PSScriptRoot 'PC-Live-Dash.exe'
+    # An installed or downloaded copy has the server .exe next to this script.
+    # A source checkout runs server.js with Node.js.
+    $exe = Join-Path $PSScriptRoot 'pc-live-dash-server.exe'
     if (Test-Path $exe) {
         $script:ServerProcess = Start-Process -FilePath $exe -WorkingDirectory $PSScriptRoot `
             -WindowStyle Hidden -PassThru
@@ -119,13 +131,57 @@ function Get-StartWithWindows {
 
 function Set-StartWithWindows([bool]$Enabled) {
     if ($Enabled) {
-        $scriptPath = Join-Path $PSScriptRoot 'tray.ps1'
-        $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
+        $launcher = Join-Path $PSScriptRoot 'PC Live Dash.exe'
+        if (Test-Path $launcher) {
+            $command = "`"$launcher`""
+        } else {
+            $scriptPath = Join-Path $PSScriptRoot 'tray.ps1'
+            $command = "powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$scriptPath`""
+        }
         Set-ItemProperty -Path $script:RunKey -Name $script:RunName -Value $command
     } else {
         Remove-ItemProperty -Path $script:RunKey -Name $script:RunName -ErrorAction SilentlyContinue
     }
 }
+
+# --- Single instance ----------------------------------------------------------
+
+# Named objects shared by every copy of this script in the user's session.
+$script:Mutex = New-Object System.Threading.Mutex($false, 'Local\PCLiveDashTray')
+$script:QuitEvent = New-Object System.Threading.EventWaitHandle(
+    $false, [System.Threading.EventResetMode]::ManualReset, 'Local\PCLiveDashTrayQuit')
+$script:SettingsEvent = New-Object System.Threading.EventWaitHandle(
+    $false, [System.Threading.EventResetMode]::AutoReset, 'Local\PCLiveDashTraySettings')
+
+# Takes the mutex if no other tray app holds it. Waits up to $TimeoutMs.
+function Enter-TrayInstance([int]$TimeoutMs = 0) {
+    try {
+        return $script:Mutex.WaitOne($TimeoutMs)
+    } catch [System.Threading.AbandonedMutexException] {
+        return $true   # the previous owner was killed; the mutex is ours now
+    }
+}
+
+if ($Quit) {
+    if (-not (Enter-TrayInstance)) {
+        [void]$script:QuitEvent.Set()
+        # Wait for the running tray app to exit. If it has not, leave the
+        # request set so it still quits once it gets to it.
+        if (Enter-TrayInstance 20000) { [void]$script:QuitEvent.Reset() }
+    }
+    exit 0
+}
+
+if (-not (Enter-TrayInstance)) {
+    # Already running: hand the request to that copy and leave.
+    if ($Settings) {
+        [void]$script:SettingsEvent.Set()
+    } elseif ($OpenDashboard) {
+        Start-Process "http://localhost:$(Get-ConfiguredPort)"
+    }
+    exit 0
+}
+[void]$script:QuitEvent.Reset()
 
 # --- Tray icon ----------------------------------------------------------------
 
@@ -409,21 +465,44 @@ $quitItem.add_Click({
     [System.Windows.Forms.Application]::Exit()
 })
 
+# Requests from other copies of this script (see "Single instance").
+$signalTimer = New-Object System.Windows.Forms.Timer
+$signalTimer.Interval = 500
+$signalTimer.add_Tick({
+    if ($script:QuitEvent.WaitOne(0)) {
+        $signalTimer.Stop()
+        $notifyIcon.Visible = $false
+        [System.Windows.Forms.Application]::Exit()
+        return
+    }
+    if ($script:SettingsEvent.WaitOne(0)) { Show-SettingsWindow }
+})
+
 # --- Start --------------------------------------------------------------------
 
-if (Start-DashServer) {
-    $running = Get-DashSettings
-    if ($running -and $running.version) { $notifyIcon.Text = "PC Live Dash v$($running.version)" }
-} else {
-    Show-Tip 'The dashboard server did not start. From a source checkout, check that Node.js is installed and npm install has been run.' 'Error'
-}
+$script:LogPath = Join-Path $env:TEMP 'pc-live-dash-tray.log'
 
 try {
+    if (Start-DashServer) {
+        $running = Get-DashSettings
+        if ($running -and $running.version) { $notifyIcon.Text = "PC Live Dash v$($running.version)" }
+        if ($OpenDashboard) { Open-Dashboard }
+    } else {
+        Show-Tip 'The dashboard server did not start. From a source checkout, check that Node.js is installed and npm install has been run.' 'Error'
+    }
+    if ($Settings) { Show-SettingsWindow }
+
+    $signalTimer.Start()
     [System.Windows.Forms.Application]::Run()
+} catch {
+    "$(Get-Date -Format s) $($_ | Out-String)`n$($_.ScriptStackTrace)" | Add-Content -Path $script:LogPath
+    throw
 } finally {
+    $signalTimer.Stop()
     $notifyIcon.Visible = $false
     $notifyIcon.Dispose()
     if ($script:ServerProcess -and -not $script:ServerProcess.HasExited) {
         Stop-Process -Id $script:ServerProcess.Id -Force -ErrorAction SilentlyContinue
     }
+    try { $script:Mutex.ReleaseMutex() } catch { }
 }

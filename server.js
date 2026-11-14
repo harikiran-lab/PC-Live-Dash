@@ -163,25 +163,28 @@ function describeSettings() {
 }
 
 /**
- * Settings can only be read or changed from this machine, by a local tool
- * such as the tray app. The custom header cannot be sent by another website
- * without a CORS preflight, which this server never approves.
+ * Settings can only be read or changed from this machine: by a local tool
+ * such as the tray app, or by the dashboard itself when it is open on this
+ * PC. The custom header cannot be sent by another website without a CORS
+ * preflight, which this server never approves, and a request that names an
+ * origin must come from the dashboard's own page.
  */
-function requireLocalTool(req, res, next) {
+function requireLocal(req, res, next) {
+  const origin = req.headers.origin;
   const allowed =
     isLoopbackAddress(req.socket.remoteAddress) &&
     isLocalHostHeader(req.headers.host) &&
-    !req.headers.origin &&
-    Boolean(req.headers['x-pc-live-dash']);
+    Boolean(req.headers['x-pc-live-dash']) &&
+    (!origin || isAllowedOrigin(origin, req.headers.host));
   if (!allowed) return res.status(403).json({ error: 'Settings are only available from this computer.' });
   next();
 }
 
-app.get('/api/settings', requireLocalTool, (req, res) => {
+app.get('/api/settings', requireLocal, (req, res) => {
   res.json(describeSettings());
 });
 
-app.put('/api/settings', requireLocalTool, express.json({ limit: '1kb' }), (req, res) => {
+app.put('/api/settings', requireLocal, express.json({ limit: '1kb' }), (req, res) => {
   const body = req.body || {};
   const change = {};
 

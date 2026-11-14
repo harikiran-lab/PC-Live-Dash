@@ -61,6 +61,7 @@
     // ═══════════════════════════════════════════════════════════════
     function init() {
         initSettingsSidebar();
+        initNetworkTab();
         initCardGroups();
         initCardDragAndDrop();
         applyCardSizes();
@@ -359,6 +360,104 @@
         });
 
         renderGroupList();
+    }
+
+    // ── Network Tab ──
+    // Shown only when the dashboard is open on the PC it monitors: the server
+    // refuses the settings API to every other device.
+    const SETTINGS_HEADERS = { 'X-PC-Live-Dash': 'dashboard' };
+
+    async function initNetworkTab() {
+        const tab = $('settings-tab-network');
+        const lanCb = $('net-lan-cb');
+        const portInput = $('net-port-input');
+        const portBtn = $('net-port-btn');
+        if (!tab || !lanCb || !portInput || !portBtn) return;
+
+        let settings;
+        try {
+            const res = await fetch('/api/settings', { headers: SETTINGS_HEADERS });
+            if (!res.ok) return;
+            settings = await res.json();
+        } catch (err) {
+            return;
+        }
+        tab.hidden = false;
+        renderNetworkSettings(settings);
+
+        lanCb.addEventListener('change', async () => {
+            const updated = await saveNetworkSettings({ lanAccess: lanCb.checked });
+            if (updated) {
+                renderNetworkSettings(updated);
+            } else {
+                lanCb.checked = !lanCb.checked;
+            }
+        });
+
+        portBtn.addEventListener('click', async () => {
+            const port = Number(portInput.value);
+            if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+                setNetworkStatus('Enter a port from 1024 to 65535.', true);
+                return;
+            }
+            const updated = await saveNetworkSettings({ port });
+            if (!updated) return;
+            if (String(updated.port) !== window.location.port) {
+                // The server is moving: follow it once it has had time to switch.
+                setNetworkStatus(`Moving to port ${updated.port}...`);
+                setTimeout(() => {
+                    window.location.href = `${window.location.protocol}//${window.location.hostname}:${updated.port}/`;
+                }, 1500);
+            }
+        });
+    }
+
+    async function saveNetworkSettings(change) {
+        setNetworkStatus('Saving...');
+        try {
+            const res = await fetch('/api/settings', {
+                method: 'PUT',
+                headers: { ...SETTINGS_HEADERS, 'Content-Type': 'application/json' },
+                body: JSON.stringify(change)
+            });
+            const body = await res.json();
+            if (!res.ok) {
+                setNetworkStatus(body.error || 'Could not save the setting.', true);
+                return null;
+            }
+            setNetworkStatus('Saved.');
+            return body;
+        } catch (err) {
+            setNetworkStatus('Could not reach the server.', true);
+            return null;
+        }
+    }
+
+    function renderNetworkSettings(settings) {
+        const lanCb = $('net-lan-cb');
+        const portInput = $('net-port-input');
+        lanCb.checked = Boolean(settings.lanAccess);
+        lanCb.disabled = Boolean(settings.hostLocked);
+        portInput.value = settings.port;
+        portInput.disabled = Boolean(settings.portLocked);
+        $('net-port-btn').disabled = Boolean(settings.portLocked);
+
+        let lanNote = 'There is no password. Anyone on your network can see your processes and network addresses. Use a trusted network only.';
+        if (settings.hostLocked) {
+            lanNote = 'Fixed by the HOST environment variable.';
+        } else if (settings.lanAccess && settings.lanUrls && settings.lanUrls.length > 0) {
+            lanNote = `Other devices can open: ${settings.lanUrls.join(', ')}`;
+        }
+        setText('net-lan-note', lanNote);
+        setText('net-port-note', settings.portLocked ? 'Fixed by the PORT environment variable.' : 'Default is 3000.');
+        setText('net-version', settings.version ? `PC Live Dash v${settings.version}` : '');
+    }
+
+    function setNetworkStatus(text, isError) {
+        const el = $('net-status');
+        if (!el) return;
+        el.textContent = text;
+        el.classList.toggle('error', Boolean(isError));
     }
 
     function renderGroupList() {

@@ -1,6 +1,6 @@
 {
   "name": "pc-live-dash",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Futuristic real-time PC hardware monitoring dashboard",
   "main": "server.js",
   "scripts": {
@@ -9,7 +9,7 @@
     "tray": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File tray.ps1",
     "test": "node --test test/cpu-load.test.js test/parsers.test.js test/settings.test.js",
     "lint": "eslint .",
-    "build:exe": "pkg . --targets node22-win-x64 --output dist/PC-Live-Dash.exe"
+    "build:exe": "pkg . --targets node22-win-x64 --output dist/pc-live-dash-server.exe"
   },
   "engines": {
     "node": ">=18"

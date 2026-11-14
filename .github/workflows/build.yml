@@ -1,6 +1,6 @@
 name: Build
 
-# Builds and tests the Windows .exe on every pull request and push to main.
+# Builds and tests the Windows installer on every pull request and push to main.
 # A GitHub Release is published when a version tag such as v2.1.0 is pushed,
 # or when the workflow is run by hand on main with "release" ticked, which
 # creates the tag for the version in package.json.
@@ -26,7 +26,7 @@ concurrency:
 
 jobs:
   build:
-    name: Build and test Windows .exe
+    name: Build and test Windows installer
     runs-on: windows-latest
     timeout-minutes: 20
     outputs:
@@ -83,32 +83,65 @@ jobs:
           }
           if ($failed) { exit 1 }
 
-      - name: Build .exe
+      - name: Build server .exe
         run: npm run build:exe
 
-      - name: Smoke test the .exe
+      - name: Build launcher .exe
+        shell: powershell
+        run: scripts\build-launcher.ps1
+
+      - name: Smoke test the server .exe
         shell: pwsh
         run: |
-          $server = Start-Process -FilePath dist\PC-Live-Dash.exe -PassThru -WindowStyle Hidden `
+          $server = Start-Process -FilePath dist\pc-live-dash-server.exe -PassThru -WindowStyle Hidden `
             -RedirectStandardOutput server.log -RedirectStandardError server.err.log
           node scripts/smoke-test.js 3000
           $result = $LASTEXITCODE
           Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           Write-Host "--- server output ---"
           Get-Content server.log, server.err.log -ErrorAction SilentlyContinue
+          Remove-Item dist\config.json -ErrorAction SilentlyContinue
           exit $result
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          & $iscc "/DAppVersion=$($env:VERSION)" installer\pc-live-dash.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test the installer (install, run, quit, uninstall)
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          try {
+            scripts\test-installer.ps1 -Setup "release\PC-Live-Dash-Setup-v$($env:VERSION).exe"
+          } finally {
+            if (Test-Path install.log) {
+              Write-Host "--- installer log (tail) ---"
+              Get-Content install.log -Tail 40
+            }
+          }
 
       - name: Assemble release files
         shell: pwsh
         env:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $name = "PC-Live-Dash-v$($env:VERSION)-win-x64"
+          # Portable copy: the same files the installer puts in place.
+          $name = "PC-Live-Dash-v$($env:VERSION)-win-x64-portable"
           New-Item -ItemType Directory -Path "release\$name" | Out-Null
-          Copy-Item dist\PC-Live-Dash.exe, tray.ps1, tray.cmd, README.md -Destination "release\$name"
+          Copy-Item "dist\PC Live Dash.exe", dist\pc-live-dash-server.exe, tray.ps1, README.md -Destination "release\$name"
           Compress-Archive -Path "release\$name" -DestinationPath "release\$name.zip"
-          Copy-Item dist\PC-Live-Dash.exe "release\$name.exe"
-          Get-FileHash "release\$name.zip", "release\$name.exe" -Algorithm SHA256 |
+          Remove-Item "release\$name" -Recurse
+          Get-FileHash (Get-ChildItem release\*.exe, release\*.zip) -Algorithm SHA256 |
             ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
             Set-Content "release\SHA256SUMS.txt"
           Get-ChildItem release -File | Format-Table Name, Length

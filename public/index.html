@@ -386,6 +386,7 @@
                 <button class="settings-tab active" data-tab="layout">Layout</button>
                 <button class="settings-tab" data-tab="components">Components</button>
                 <button class="settings-tab" data-tab="groups">Groups</button>
+                <button class="settings-tab" data-tab="network" id="settings-tab-network" hidden>Network</button>
             </div>
             <div class="settings-tab-content">
                 <!-- Layout Tab -->
@@ -403,6 +404,25 @@
                         <button id="group-create-btn">+ Create</button>
                     </div>
                     <div id="group-list"></div>
+                </div>
+                <div class="settings-tab-panel" id="tab-network">
+                    <div class="net-setting">
+                        <label class="net-setting-toggle">
+                            <input type="checkbox" id="net-lan-cb">
+                            <span>Allow other devices on my network</span>
+                        </label>
+                        <div class="net-setting-note" id="net-lan-note"></div>
+                    </div>
+                    <div class="net-setting">
+                        <label class="net-setting-label" for="net-port-input">Port</label>
+                        <div class="group-create-row">
+                            <input type="number" id="net-port-input" min="1024" max="65535" step="1">
+                            <button id="net-port-btn">Apply</button>
+                        </div>
+                        <div class="net-setting-note" id="net-port-note"></div>
+                    </div>
+                    <div class="net-setting-note" id="net-status"></div>
+                    <div class="net-setting-note" id="net-version"></div>
                 </div>
             </div>
             <div class="lock-toggle">

@@ -22,15 +22,29 @@ The layout is customisable from the settings sidebar: cards can be dragged, resi
 - Windows 10 or 11 for the full feature set
 - Optional: an NVIDIA GPU with `nvidia-smi` on the `PATH` for detailed GPU stats
 
-## Download (no Node.js needed)
+## Install on Windows (no Node.js needed)
 
-Each release on the [Releases page](https://github.com/harikiran-lab/PC-Live-Dash/releases) includes a ready-built Windows version:
+1. Download `PC-Live-Dash-Setup-vX.Y.Z.exe` from the [Releases page](https://github.com/harikiran-lab/PC-Live-Dash/releases) and run it.
+2. Leave **Start PC Live Dash in the background when I sign in to Windows** ticked if you want it always running.
+3. Finish the installer. The tray icon appears and the dashboard opens in your browser at <http://localhost:3000>.
 
-1. Download `PC-Live-Dash-vX.Y.Z-win-x64.zip` and extract it anywhere.
-2. Double-click `tray.cmd` to start the tray app, which runs `PC-Live-Dash.exe` in the background. Or run `PC-Live-Dash.exe` directly to get the server in a console window.
-3. Open <http://localhost:3000>.
+What you get:
 
-The .exe is not code-signed, so Windows SmartScreen may warn the first time. Settings are saved in `config.json` next to the .exe. The Windows service scripts need the source setup below.
+- **Tray icon** in the notification area, with no console window. Right-click it for Open Dashboard, Settings, the LAN access switch and Quit. If you do not see it, click the **^** arrow next to the clock; you can drag it onto the taskbar from there.
+- **Start menu shortcuts**: *PC Live Dash* opens the dashboard, and *PC Live Dash Settings* opens the settings window.
+- **Background running**: with the sign-in option on, the tray app and dashboard server start quietly each time you sign in.
+- **Uninstaller** under Windows Settings > Apps > Installed apps. It stops the app and removes its files, shortcuts and sign-in entry.
+
+The installer is per-user: it needs no administrator rights and installs to `%LOCALAPPDATA%\Programs\PC Live Dash`. It is not code-signed, so Windows SmartScreen may show a warning the first time; choose **More info** then **Run anyway**.
+
+A portable zip is also attached to each release. Extract it anywhere and run `PC Live Dash.exe`.
+
+`pc-live-dash-server.exe` is the dashboard server on its own. Running it directly opens a console window and shows no tray icon, so start the app with `PC Live Dash.exe` or the Start menu instead.
+
+### Where the settings are
+
+- Right-click the tray icon and choose **Settings...**, or open **PC Live Dash Settings** from the Start menu.
+- In the dashboard itself, click the settings button and open the **Network** tab. This tab only appears when the dashboard is open on the PC it is monitoring.
 
 ## Setup from source
 
@@ -52,7 +66,7 @@ By default the dashboard is on port 3000 and only this computer can open it. Sto
 
 ## System tray app (Windows)
 
-The tray app puts a PC Live Dash icon in the notification area and gives you a settings window. Start it by double-clicking `tray.cmd`, or run:
+The tray app puts a PC Live Dash icon in the notification area and gives you a settings window. The installed app starts it for you. From a source checkout, start it by double-clicking `tray.cmd`, or run:
 
 ```powershell
 npm run tray
@@ -78,7 +92,7 @@ The settings window has:
 
 Changes take effect straight away without restarting the server, and open dashboards reconnect on their own. If a new port is already taken, the server goes back to the previous one.
 
-LAN access and the port are saved in `config.json` in the project folder, so they survive restarts and also apply to the Windows service. The startup option is saved in the current user's Windows `Run` registry key.
+LAN access and the port are saved in `config.json` in the app's folder, so they survive restarts and also apply to the Windows service. The same two settings are in the dashboard's **Network** settings tab. The startup option is saved in the current user's Windows `Run` registry key.
 
 > **Note:** there is no authentication. With LAN access on, anyone on your network who can reach the port can see your process list, services and network addresses. Only turn it on for a network you trust. The first time it is turned on, Windows Firewall may ask whether to allow Node.js.
 
@@ -165,12 +179,17 @@ Chart.js is served from the installed npm package, so the dashboard works withou
 ```
 server.js              Express + WebSocket server and metric collection
 tray.ps1               System tray app with the settings window
+launcher/Launcher.cs   Windowless launcher that starts the tray app
+installer/             Inno Setup script for the Windows installer
+assets/icon.ico        App icon
 tray.cmd               Double-click launcher for the tray app
 config.json            Saved settings, created on first change (not committed)
 lib/cpu-load.js        CPU load sampling
 lib/settings.js        Saved settings and listening address rules
 lib/paths.js           File locations for source and packaged runs
 scripts/smoke-test.js  End-to-end check of a running server
+scripts/build-launcher.ps1   Builds the launcher
+scripts/test-installer.ps1   Install, run, quit and uninstall test used in CI
 .github/workflows/     Build, test and release workflow
 lib/parsers.js         Parsers for nvidia-smi and PowerShell output
 test/                  Unit tests for lib/
@@ -200,12 +219,14 @@ git push --follow-tags
 
 Or bump the version in a pull request, merge it, then run the **Build** workflow by hand from the Actions tab on `main` with **release** ticked. That creates the tag for you.
 
-Pushing a `v*` tag runs the **Build** workflow (`.github/workflows/build.yml`), which lints, tests, builds `PC-Live-Dash.exe`, smoke-tests it on Windows, and publishes a GitHub Release with the zip, the bare .exe and SHA-256 checksums. The workflow refuses a tag that does not match the `package.json` version. It also runs on every pull request and push to `main`, where the build is kept as a workflow artifact without a release.
+Pushing a `v*` tag runs the **Build** workflow (`.github/workflows/build.yml`). On a Windows runner it lints, tests, builds the server and launcher, builds the installer with Inno Setup, then installs it, runs it, quits it and uninstalls it as a test. It publishes a GitHub Release with the installer, a portable zip and SHA-256 checksums. The workflow refuses a tag that does not match the `package.json` version. It also runs on every pull request and push to `main`, where the build is kept as a workflow artifact without a release.
 
-To build the .exe locally:
+To build locally on Windows (the installer step needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)):
 
-```bash
-npm run build:exe          # writes dist/PC-Live-Dash.exe
+```powershell
+npm run build:exe                                   # dist\pc-live-dash-server.exe
+powershell -ExecutionPolicy Bypass -File scripts\build-launcher.ps1   # dist\PC Live Dash.exe
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=2.2.0 installer\pc-live-dash.iss
 ```
 
 ## Development
