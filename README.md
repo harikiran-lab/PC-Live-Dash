@@ -38,29 +38,56 @@ npm start
 
 Then open <http://localhost:3000>.
 
-By default the server only accepts connections from the same computer. To use a different port, set the `PORT` environment variable:
+By default the dashboard is on port 3000 and only this computer can open it. Stop the server with `Ctrl+C`.
+
+## System tray app (Windows)
+
+The tray app puts a PC Live Dash icon in the notification area and gives you a settings window. Start it by double-clicking `tray.cmd`, or run:
 
 ```powershell
-# PowerShell
-$env:PORT = 8080; npm start
+npm run tray
 ```
 
-```bash
-# bash
-PORT=8080 npm start
+If the server is not already running, the tray app starts it in the background and stops it again when you choose **Quit**. If the Windows service is running, the tray app controls that instead.
+
+Right-click the icon for the menu:
+
+- **Open Dashboard** opens the dashboard in your browser. Double-clicking the icon does the same.
+- **Settings...** opens the settings window.
+- **Allow LAN access** is a quick on/off switch for access from other devices.
+- **Copy LAN address** appears while LAN access is on.
+- **Quit** closes the tray app.
+
+The settings window has:
+
+| Setting | What it does |
+| --- | --- |
+| Allow other devices on my network | Lets phones and other PCs on your network open the dashboard at the address shown. Off by default. |
+| Port | The port the dashboard uses. Default 3000. |
+| Start PC Live Dash when I sign in to Windows | Starts the tray app, and with it the server, at sign-in. |
+
+Changes take effect straight away without restarting the server, and open dashboards reconnect on their own. If a new port is already taken, the server goes back to the previous one.
+
+LAN access and the port are saved in `config.json` in the project folder, so they survive restarts and also apply to the Windows service. The startup option is saved in the current user's Windows `Run` registry key.
+
+> **Note:** there is no authentication. With LAN access on, anyone on your network who can reach the port can see your process list, services and network addresses. Only turn it on for a network you trust. The first time it is turned on, Windows Firewall may ask whether to allow Node.js.
+
+### Settings without the tray app
+
+You can edit `config.json` by hand and restart the server:
+
+```json
+{
+  "lanAccess": true,
+  "port": 3000
+}
 ```
 
-Stop the server with `Ctrl+C`.
-
-### Viewing from another device
-
-To open the dashboard from a phone or another PC on your network, set `HOST` to `0.0.0.0` and browse to `http://<your-pc-ip>:3000`:
+The `HOST` and `PORT` environment variables override the saved settings, and the tray app shows those settings as fixed:
 
 ```powershell
-$env:HOST = "0.0.0.0"; npm start
+$env:HOST = "0.0.0.0"; $env:PORT = 8080; npm start
 ```
-
-> **Note:** there is no authentication. With `HOST=0.0.0.0`, anyone on your network who can reach the port can see your process list, services, hardware details and network addresses. Only do this on a network you trust.
 
 ## Running as a Windows service
 
@@ -72,7 +99,7 @@ Installing the service makes the dashboard start with Windows and keep running i
    node install-service.js
    ```
 
-   This registers a service called **PC Live Dashboard Server** (`PCLiveDashboard`), starts it, and serves the dashboard on port 3000. Windows may show a few permission prompts. The service wrapper and its logs are written to a `daemon/` folder inside the project.
+   This registers a service called **PC Live Dashboard Server** (`PCLiveDashboard`) and starts it. The dashboard is served on the port saved in `config.json`, or 3000 if none is saved. Windows may show a few permission prompts. The service wrapper and its logs are written to a `daemon/` folder inside the project.
 
 2. To remove the service, again from an Administrator terminal:
 
@@ -82,7 +109,7 @@ Installing the service makes the dashboard start with Windows and keep running i
 
 You can also start, stop and restart the service from the Windows Services app (`services.msc`).
 
-The service runs `server.js` from this folder, so keep the folder in place after installing. To change the port, or to add `HOST` for access from other devices, edit the `env` list in `install-service.js`, then uninstall and reinstall the service.
+The service runs `server.js` from this folder, so keep the folder in place after installing. Use the tray app to change the port or LAN access while the service is running. A service cannot show a tray icon itself, so start the tray app separately with `tray.cmd`.
 
 ## Troubleshooting
 
@@ -96,7 +123,8 @@ node test-cpu.js   # prints overall and per-core CPU load once a second for five
 Common issues:
 
 - **GPU shows N/A**: on NVIDIA cards, check that `nvidia-smi` runs from a terminal. For AMD and Intel, the server falls back to `gpu.ps1`, which needs PowerShell and the Windows GPU performance counters.
-- **Port already in use**: another program is using port 3000. Set a different `PORT`.
+- **Port already in use**: another program is using the port. Pick a different one in the tray settings, in `config.json`, or with `PORT`.
+- **Tray icon does not appear**: check the hidden icons arrow in the taskbar. The tray app needs Windows PowerShell, which ships with Windows.
 - **Service install does nothing**: make sure the terminal is running as Administrator. If it reports that `node-windows` is missing, run `npm install` again.
 
 ## How accurate are the numbers
@@ -118,7 +146,7 @@ Most values are read directly from the system. A few are estimates, used when th
 | Medium | 5 s | Processes, disk usage and I/O, GPU, CPU temperature and speed |
 | Slow | 15 s | Battery, uptime, services |
 
-Static details such as the CPU model, OS and network interfaces are sent once when a browser connects. Collection pauses when no browser is connected, so an idle service uses almost no CPU.
+Static details such as the CPU model, OS and network interfaces are sent once when a browser connects. Collection pauses when no browser is connected, so an idle service uses almost no CPU. Messages carry only the fields the dashboard shows, and a background browser tab skips rebuilding its tables until you return to it.
 
 Chart.js is served from the installed npm package, so the dashboard works without internet. Only the fonts load from Google Fonts, and the page falls back to system fonts when offline.
 
@@ -126,7 +154,11 @@ Chart.js is served from the installed npm package, so the dashboard works withou
 
 ```
 server.js              Express + WebSocket server and metric collection
+tray.ps1               System tray app with the settings window
+tray.cmd               Double-click launcher for the tray app
+config.json            Saved settings, created on first change (not committed)
 lib/cpu-load.js        CPU load sampling
+lib/settings.js        Saved settings and listening address rules
 lib/parsers.js         Parsers for nvidia-smi and PowerShell output
 test/                  Unit tests for lib/
 gpu.ps1                PowerShell fallback for GPU utilisation and VRAM (AMD, Intel)

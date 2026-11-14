@@ -69,6 +69,7 @@
         initCharts();
         initEventListeners();
         connectWebSocket();
+        document.addEventListener('visibilitychange', flushDeferredMessages);
         startClock();
         initResizeObserver();
         setTimeout(resizeGridItems, 100);
@@ -1176,7 +1177,28 @@
     // ═══════════════════════════════════════════════════════════════
     // MESSAGE HANDLER
     // ═══════════════════════════════════════════════════════════════
+    // Tables are rebuilt on every medium and slow message. While the tab is in
+    // the background only the newest of each is kept and applied on return.
+    const deferredMessages = {};
+
     function handleMessage(msg) {
+        if (document.hidden && (msg.type === 'medium' || msg.type === 'slow')) {
+            deferredMessages[msg.type] = msg;
+            return;
+        }
+        applyMessage(msg);
+    }
+
+    function flushDeferredMessages() {
+        if (document.hidden) return;
+        ['medium', 'slow'].forEach(type => {
+            const msg = deferredMessages[type];
+            delete deferredMessages[type];
+            if (msg) applyMessage(msg);
+        });
+    }
+
+    function applyMessage(msg) {
         switch (msg.type) {
             case 'static':
                 handleStaticData(msg.data);
@@ -1193,7 +1215,18 @@
             default:
                 console.warn('[PC Live Dash] Unknown message type:', msg.type);
         }
-        resizeGridItems();
+        scheduleGridResize();
+    }
+
+    // Several messages can arrive in one frame: measure the grid once per frame.
+    let gridResizeQueued = false;
+    function scheduleGridResize() {
+        if (gridResizeQueued) return;
+        gridResizeQueued = true;
+        requestAnimationFrame(() => {
+            gridResizeQueued = false;
+            resizeGridItems();
+        });
     }
 
     // ═══════════════════════════════════════════════════════════════

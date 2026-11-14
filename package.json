@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node --test test/cpu-load.test.js test/parsers.test.js",
+    "tray": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File tray.ps1",
+    "test": "node --test test/cpu-load.test.js test/parsers.test.js test/settings.test.js",
     "lint": "eslint ."
   },
   "engines": {
