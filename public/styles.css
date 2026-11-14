@@ -1318,7 +1318,19 @@ input, button, textarea, select {
 .gpu-charts-row .chart-container {
   flex: 1;
   width: 50%;
-  height: 95px;
+  min-width: 0;
+  height: 130px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The canvas gets its own box under the label. Without it the chart takes the
+   full container height and its lower part, where low readings are drawn,
+   is cut off. */
+.chart-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
 }
 
 .chart-label-mini {

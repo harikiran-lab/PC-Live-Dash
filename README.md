@@ -226,7 +226,7 @@ To build locally on Windows (the installer step needs [Inno Setup 6](https://jrs
 ```powershell
 npm run build:exe                                   # dist\pc-live-dash-server.exe
 powershell -ExecutionPolicy Bypass -File scripts\build-launcher.ps1   # dist\PC Live Dash.exe
-& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=2.2.0 installer\pc-live-dash.iss
+& "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" /DAppVersion=2.2.1 installer\pc-live-dash.iss
 ```
 
 ## Development
