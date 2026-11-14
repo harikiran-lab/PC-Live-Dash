@@ -61,11 +61,18 @@ function Get-ErrorText($ErrorRecord) {
 function Start-DashServer {
     if (Get-DashSettings) { return $true }   # already running, e.g. as the service
 
-    $node = Get-Command node -ErrorAction SilentlyContinue
-    if (-not $node) { return $false }
-
-    $script:ServerProcess = Start-Process -FilePath $node.Source -ArgumentList 'server.js' `
-        -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+    # A release download has PC-Live-Dash.exe next to this script. A source
+    # checkout runs server.js with Node.js.
+    $exe = Join-Path $PSScriptRoot 'PC-Live-Dash.exe'
+    if (Test-Path $exe) {
+        $script:ServerProcess = Start-Process -FilePath $exe -WorkingDirectory $PSScriptRoot `
+            -WindowStyle Hidden -PassThru
+    } else {
+        $node = Get-Command node -ErrorAction SilentlyContinue
+        if (-not $node) { return $false }
+        $script:ServerProcess = Start-Process -FilePath $node.Source -ArgumentList 'server.js' `
+            -WorkingDirectory $PSScriptRoot -WindowStyle Hidden -PassThru
+    }
 
     # The server gathers hardware details before it starts listening.
     for ($i = 0; $i -lt 60; $i++) {
@@ -404,8 +411,11 @@ $quitItem.add_Click({
 
 # --- Start --------------------------------------------------------------------
 
-if (-not (Start-DashServer)) {
-    Show-Tip 'The dashboard server did not start. Check that Node.js is installed and npm install has been run.' 'Error'
+if (Start-DashServer) {
+    $running = Get-DashSettings
+    if ($running -and $running.version) { $notifyIcon.Text = "PC Live Dash v$($running.version)" }
+} else {
+    Show-Tip 'The dashboard server did not start. From a source checkout, check that Node.js is installed and npm install has been run.' 'Error'
 }
 
 try {

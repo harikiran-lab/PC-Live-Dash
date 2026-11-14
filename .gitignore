@@ -12,6 +12,9 @@ node_modules/
 config.json
 config.json.tmp
 
+# Build output
+dist/
+
 # Logs
 logs/
 *.log

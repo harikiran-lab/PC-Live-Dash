@@ -8,7 +8,8 @@
     "dev": "node server.js",
     "tray": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File tray.ps1",
     "test": "node --test test/cpu-load.test.js test/parsers.test.js test/settings.test.js",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "build:exe": "pkg . --targets node22-win-x64 --output dist/PC-Live-Dash.exe"
   },
   "engines": {
     "node": ">=18"
@@ -33,7 +34,16 @@
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@yao-pkg/pkg": "^6.25.0",
     "eslint": "^10.15.0",
     "globals": "^17.14.0"
+  },
+  "bin": "server.js",
+  "pkg": {
+    "assets": [
+      "public/**/*",
+      "gpu.ps1",
+      "node_modules/chart.js/dist/chart.umd.min.js"
+    ]
   }
 }
