@@ -2697,3 +2697,54 @@ input, button, textarea, select {
 [data-component].component-hidden {
   display: none !important;
 }
+
+/* ── Settings: Network tab ── */
+.settings-tab[hidden] {
+  display: none;
+}
+
+.net-setting {
+  margin-bottom: 18px;
+}
+
+.net-setting-toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.net-setting-label {
+  display: block;
+  font-size: 0.75rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.net-setting-note {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: var(--text-muted);
+  margin-top: 6px;
+  word-break: break-word;
+}
+
+.net-setting-note.error {
+  color: #f87171;
+}
+
+/* Four tabs need to share the sidebar width. */
+.settings-tabs {
+  padding: 0 12px;
+}
+
+.settings-tab {
+  flex: 1 1 auto;
+  padding: 10px 8px;
+  font-size: 0.74rem;
+  white-space: nowrap;
+}

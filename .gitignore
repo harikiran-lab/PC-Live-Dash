@@ -14,6 +14,8 @@ config.json.tmp
 
 # Build output
 dist/
+release/
+install.log
 
 # Logs
 logs/
