@@ -30,6 +30,7 @@ const {
   isLoopbackAddress,
   isLocalHostHeader,
 } = require('./lib/settings');
+const { dataDir, externalScriptPath } = require('./lib/paths');
 const { version } = require('./package.json');
 
 // ─── Configuration ──────────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ const { version } = require('./package.json');
 // Settings are saved in config.json and changed from the tray app. By default
 // the server listens on port 3000 on this machine only. The PORT and HOST
 // environment variables override the saved values. There is no authentication.
-const settingsStore = createSettingsStore(path.join(__dirname, 'config.json'));
+const settingsStore = createSettingsStore(path.join(dataDir, 'config.json'));
 const FAST_INTERVAL_MS = 2000;
 const MEDIUM_INTERVAL_MS = 5000;
 const SLOW_INTERVAL_MS = 15000;
@@ -152,6 +153,7 @@ function describeSettings() {
   const settings = settingsStore.get();
   const lanAccess = !isLoopbackHost(listening.host);
   return {
+    version,
     lanAccess,
     port: listening.port,
     hostLocked: resolveHost(process.env.HOST, settings).locked,
@@ -361,6 +363,12 @@ async function getWindowsDiskIoStats() {
   }
 }
 
+let cachedGpuScriptPath = null;
+function gpuScriptPath() {
+  if (!cachedGpuScriptPath) cachedGpuScriptPath = externalScriptPath('gpu.ps1', version);
+  return cachedGpuScriptPath;
+}
+
 /**
  * Run gpu.ps1 to fetch GPU utilization and VRAM from Windows performance
  * counters. This supports AMD and Intel graphics on Windows.
@@ -371,7 +379,7 @@ async function getWindowsGpuStats() {
     '-ExecutionPolicy',
     'Bypass',
     '-File',
-    path.join(__dirname, 'gpu.ps1'),
+    gpuScriptPath(),
   ]);
   if (!stdout) return null;
   try {

@@ -1,0 +1,140 @@
+name: Build
+
+# Builds and tests the Windows .exe on every pull request and push to main.
+# Pushing a version tag such as v2.0.0 also publishes a GitHub Release.
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+jobs:
+  build:
+    name: Build and test Windows .exe
+    runs-on: windows-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Read version
+        id: version
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "package.json version: $version"
+
+      - name: Check the tag matches package.json
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ($env:TAG -ne "v$($env:VERSION)") {
+            Write-Error "Tag $($env:TAG) does not match package.json version $($env:VERSION). Use 'npm version' to create tags."
+            exit 1
+          }
+
+      - run: npm ci
+
+      - run: npm run lint
+
+      - run: npm test
+
+      - name: Check PowerShell scripts for syntax errors
+        # Windows PowerShell 5.1 is what the tray app and server use.
+        shell: powershell
+        run: |
+          $failed = $false
+          foreach ($file in 'tray.ps1', 'gpu.ps1') {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path, [ref]$tokens, [ref]$errors)
+            if ($errors.Count -gt 0) {
+              $failed = $true
+              $errors | ForEach-Object { Write-Host "$file line $($_.Extent.StartLineNumber): $($_.Message)" }
+            } else {
+              Write-Host "$file parses cleanly"
+            }
+          }
+          if ($failed) { exit 1 }
+
+      - name: Build .exe
+        run: npm run build:exe
+
+      - name: Smoke test the .exe
+        shell: pwsh
+        run: |
+          $server = Start-Process -FilePath dist\PC-Live-Dash.exe -PassThru -WindowStyle Hidden `
+            -RedirectStandardOutput server.log -RedirectStandardError server.err.log
+          node scripts/smoke-test.js 3000
+          $result = $LASTEXITCODE
+          Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          Write-Host "--- server output ---"
+          Get-Content server.log, server.err.log -ErrorAction SilentlyContinue
+          exit $result
+
+      - name: Assemble release files
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $name = "PC-Live-Dash-v$($env:VERSION)-win-x64"
+          New-Item -ItemType Directory -Path "release\$name" | Out-Null
+          Copy-Item dist\PC-Live-Dash.exe, tray.ps1, tray.cmd, README.md -Destination "release\$name"
+          Compress-Archive -Path "release\$name" -DestinationPath "release\$name.zip"
+          Copy-Item dist\PC-Live-Dash.exe "release\$name.exe"
+          Get-FileHash "release\$name.zip", "release\$name.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" } |
+            Set-Content "release\SHA256SUMS.txt"
+          Get-ChildItem release -File | Format-Table Name, Length
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PC-Live-Dash-v${{ steps.version.outputs.version }}-win-x64
+          path: |
+            release/*.zip
+            release/*.exe
+            release/SHA256SUMS.txt
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: PC-Live-Dash-v${{ needs.build.outputs.version }}-win-x64
+          path: release
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release create "$TAG" release/* \
+            --title "PC Live Dash $TAG" \
+            --generate-notes \
+            --verify-tag

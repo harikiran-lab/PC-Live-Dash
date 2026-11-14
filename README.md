@@ -22,7 +22,17 @@ The layout is customisable from the settings sidebar: cards can be dragged, resi
 - Windows 10 or 11 for the full feature set
 - Optional: an NVIDIA GPU with `nvidia-smi` on the `PATH` for detailed GPU stats
 
-## Setup
+## Download (no Node.js needed)
+
+Each release on the [Releases page](https://github.com/harikiran-lab/PC-Live-Dash/releases) includes a ready-built Windows version:
+
+1. Download `PC-Live-Dash-vX.Y.Z-win-x64.zip` and extract it anywhere.
+2. Double-click `tray.cmd` to start the tray app, which runs `PC-Live-Dash.exe` in the background. Or run `PC-Live-Dash.exe` directly to get the server in a console window.
+3. Open <http://localhost:3000>.
+
+The .exe is not code-signed, so Windows SmartScreen may warn the first time. Settings are saved in `config.json` next to the .exe. The Windows service scripts need the source setup below.
+
+## Setup from source
 
 ```bash
 git clone https://github.com/harikiran-lab/PC-Live-Dash.git
@@ -159,6 +169,9 @@ tray.cmd               Double-click launcher for the tray app
 config.json            Saved settings, created on first change (not committed)
 lib/cpu-load.js        CPU load sampling
 lib/settings.js        Saved settings and listening address rules
+lib/paths.js           File locations for source and packaged runs
+scripts/smoke-test.js  End-to-end check of a running server
+.github/workflows/     Build, test and release workflow
 lib/parsers.js         Parsers for nvidia-smi and PowerShell output
 test/                  Unit tests for lib/
 gpu.ps1                PowerShell fallback for GPU utilisation and VRAM (AMD, Intel)
@@ -174,11 +187,31 @@ public/
   styles.css           Styles
 ```
 
+## Versions and releases
+
+The version lives in `package.json` and follows `MAJOR.MINOR.PATCH`. The server prints it at startup and the tray icon shows it in its tooltip.
+
+To publish a release, bump the version and push the tag that `npm version` creates:
+
+```bash
+npm version patch          # or minor / major. Commits and tags, e.g. v2.0.1
+git push --follow-tags
+```
+
+Pushing a `v*` tag runs the **Build** workflow (`.github/workflows/build.yml`), which lints, tests, builds `PC-Live-Dash.exe`, smoke-tests it on Windows, and publishes a GitHub Release with the zip, the bare .exe and SHA-256 checksums. The workflow refuses a tag that does not match the `package.json` version. It also runs on every pull request and push to `main`, where the build is kept as a workflow artifact without a release.
+
+To build the .exe locally:
+
+```bash
+npm run build:exe          # writes dist/PC-Live-Dash.exe
+```
+
 ## Development
 
 ```bash
 npm test       # unit tests (Node's built-in test runner)
 npm run lint   # ESLint, needs Node 20 or newer
+node scripts/smoke-test.js 3000   # checks a running server end to end
 ```
 
 ## License
