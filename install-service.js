@@ -5,14 +5,9 @@ const path = require('path');
 const svc = new Service({
   name: 'PCLiveDashboard',
   displayName: 'PC Live Dashboard Server',
-  description: 'Futuristic PC Hardware Live Monitoring Dashboard (http://localhost:3000)',
-  script: path.join(__dirname, 'server.js'),
-  env: [
-    {
-      name: 'PORT',
-      value: 3000
-    }
-  ]
+  description: 'Futuristic PC Hardware Live Monitoring Dashboard',
+  // The port and LAN access come from config.json, set from the tray app.
+  script: path.join(__dirname, 'server.js')
 });
 
 // Listen for the "install" event

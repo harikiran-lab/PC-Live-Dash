@@ -8,6 +8,10 @@ node_modules/
 *.pem
 *.key
 
+# Saved app settings (LAN access)
+config.json
+config.json.tmp
+
 # Logs
 logs/
 *.log

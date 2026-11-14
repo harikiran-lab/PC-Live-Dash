@@ -1,18 +1,39 @@
 {
   "name": "pc-live-dash",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Futuristic real-time PC hardware monitoring dashboard",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "tray": "powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File tray.ps1",
+    "test": "node --test test/cpu-load.test.js test/parsers.test.js test/settings.test.js",
+    "lint": "eslint ."
   },
-  "keywords": ["dashboard", "monitoring", "system", "hardware", "real-time"],
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "dashboard",
+    "monitoring",
+    "system",
+    "hardware",
+    "real-time"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "chart.js": "^4.6.1",
     "express": "^4.21.0",
     "systeminformation": "^5.23.0",
     "ws": "^8.18.0"
+  },
+  "optionalDependencies": {
+    "node-windows": "^1.0.0-beta.8"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.15.0",
+    "globals": "^17.14.0"
   }
 }
