@@ -1,7 +1,9 @@
 name: Build
 
 # Builds and tests the Windows .exe on every pull request and push to main.
-# Pushing a version tag such as v2.0.0 also publishes a GitHub Release.
+# A GitHub Release is published when a version tag such as v2.1.0 is pushed,
+# or when the workflow is run by hand on main with "release" ticked, which
+# creates the tag for the version in package.json.
 
 on:
   push:
@@ -9,6 +11,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: Publish a GitHub Release for the version in package.json
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -117,7 +124,7 @@ jobs:
 
   release:
     name: Publish GitHub Release
-    if: github.ref_type == 'tag'
+    if: github.ref_type == 'tag' || (github.event_name == 'workflow_dispatch' && inputs.release)
     needs: build
     runs-on: ubuntu-latest
     permissions:
@@ -132,9 +139,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          TAG: ${{ github.ref_name }}
+          TAG: v${{ needs.build.outputs.version }}
+          REF_TYPE: ${{ github.ref_type }}
+          REF: ${{ github.ref }}
         run: |
-          gh release create "$TAG" release/* \
-            --title "PC Live Dash $TAG" \
-            --generate-notes \
-            --verify-tag
+          if [ "$REF_TYPE" = "tag" ]; then
+            # The tag already exists and was checked against package.json.
+            gh release create "$TAG" release/* \
+              --title "PC Live Dash $TAG" --generate-notes --verify-tag
+          else
+            if [ "$REF" != "refs/heads/main" ]; then
+              echo "::error::Releases are published from main, not $REF."
+              exit 1
+            fi
+            # Creates the tag on the commit that was built.
+            gh release create "$TAG" release/* \
+              --title "PC Live Dash $TAG" --generate-notes --target "$GITHUB_SHA"
+          fi
