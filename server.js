@@ -1,15 +1,15 @@
 /**
  * PC Live Dashboard - Server
- * 
+ *
  * Node.js backend that collects real-time system metrics using the
  * `systeminformation` library and broadcasts them to connected clients
  * over WebSocket. Metrics are collected at three tiers:
- *   - Fast  (1s):  CPU load, RAM, network stats, CPU temp & speed
- *   - Medium (3s): Processes, disk usage, disk I/O, GPU info
- *   - Slow  (10s): Battery, uptime, services
- * 
- * Static system info (CPU model, OS, motherboard, etc.) is sent once
- * when a client first connects.
+ *   - Fast   (2s):  CPU load, RAM, network stats
+ *   - Medium (5s):  Processes, disk usage, disk I/O, GPU, CPU temp & speed
+ *   - Slow   (15s): Battery, uptime, services
+ *
+ * Collection only runs while at least one client is connected. Static
+ * system info (CPU model, OS, etc.) is sent once when a client connects.
  */
 
 const express = require('express');
@@ -17,34 +17,48 @@ const http = require('http');
 const WebSocket = require('ws');
 const si = require('systeminformation');
 const path = require('path');
-const os = require('os');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
+const { createCpuLoadSampler } = require('./lib/cpu-load');
+const { parseNvidiaSmi, parseWindowsDiskIo, isAllowedOrigin } = require('./lib/parsers');
+const { version } = require('./package.json');
 
 // ─── Configuration ──────────────────────────────────────────────────────────────
 
 const PORT = process.env.PORT || 3000;
+// Listen on this machine only by default. Set HOST=0.0.0.0 to allow other
+// devices on the network to connect (there is no authentication).
+const HOST = process.env.HOST || '127.0.0.1';
 const FAST_INTERVAL_MS = 2000;
 const MEDIUM_INTERVAL_MS = 5000;
 const SLOW_INTERVAL_MS = 15000;
+// Upper bound for nvidia-smi and PowerShell calls so a hung child process
+// cannot stall a collection tier.
+const EXEC_TIMEOUT_MS = 8000;
 
 // ─── Express & HTTP Setup ───────────────────────────────────────────────────────
 
 const app = express();
+app.disable('x-powered-by');
 app.use(express.static(path.join(__dirname, 'public')));
+// Chart.js is served from the installed package so the dashboard works offline.
+app.use('/vendor/chart.js', express.static(path.join(__dirname, 'node_modules', 'chart.js', 'dist')));
 
 const server = http.createServer(app);
 
 // ─── WebSocket Setup ────────────────────────────────────────────────────────────
 
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({
+  server,
+  // Reject connections opened by pages on other sites.
+  verifyClient: ({ origin, req }) => isAllowedOrigin(origin, req.headers.host),
+});
 
 // ─── State ──────────────────────────────────────────────────────────────────────
 
 let staticData = null;
-let fastInterval = null;
-let mediumInterval = null;
-let slowInterval = null;
 let latestCpuLoad = 0;
+let shuttingDown = false;
+const cpuLoadSampler = createCpuLoadSampler();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -77,6 +91,18 @@ async function safeCall(fn) {
   }
 }
 
+/**
+ * Run an external command and resolve with its stdout, or null if it
+ * fails, is missing, or exceeds EXEC_TIMEOUT_MS.
+ */
+function run(command, args) {
+  return new Promise((resolve) => {
+    execFile(command, args, { timeout: EXEC_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
+      resolve(error ? null : stdout);
+    });
+  });
+}
+
 // ─── Data Collection ────────────────────────────────────────────────────────────
 
 /**
@@ -96,154 +122,71 @@ async function collectStaticData() {
   return { cpu, osInfo, system, memLayout, diskLayout, networkInterfaces };
 }
 
-// Native CPU load calculation using os.cpus() to avoid WMI/Process overhead
-let lastCpuStats = getCpuTimes();
-
-function getCpuTimes() {
-  const cpus = os.cpus();
-  return cpus.map((cpu) => {
-    const times = cpu.times;
-    const total = Object.values(times).reduce((a, b) => a + b, 0);
-    return { idle: times.idle, total };
-  });
-}
-
-function calculateCpuLoad() {
-  const currentCpuStats = getCpuTimes();
-  const cpus = [];
-  let totalIdle = 0;
-  let totalTime = 0;
-
-  for (let i = 0; i < currentCpuStats.length; i++) {
-    const last = lastCpuStats[i];
-    const cur = currentCpuStats[i];
-    if (!last) continue;
-
-    const idleDiff = cur.idle - last.idle;
-    const totalDiff = cur.total - last.total;
-
-    const load = totalDiff > 0 ? (1 - idleDiff / totalDiff) * 100 : 0;
-    cpus.push({ load });
-
-    totalIdle += idleDiff;
-    totalTime += totalDiff;
-  }
-
-  lastCpuStats = currentCpuStats;
-
-  const overallLoad = totalTime > 0 ? (1 - totalIdle / totalTime) * 100 : 0;
-  return {
-    currentLoad: overallLoad,
-    cpus
-  };
-}
-
 /**
- * Execute nvidia-smi command to get detailed per-GPU metrics on Windows.
+ * Query nvidia-smi for detailed per-GPU metrics.
  * Returns null if nvidia-smi is not available or fails.
  */
-function getNvidiaGpuStats() {
-  return new Promise((resolve) => {
-    exec('nvidia-smi --query-gpu=name,utilization.gpu,memory.total,memory.used,temperature.gpu,fan.speed,power.draw --format=csv,noheader,nounits', (error, stdout, stderr) => {
-      if (error) {
-        return resolve(null);
-      }
-      try {
-        const lines = stdout.trim().split('\n');
-        const stats = lines.map(line => {
-          const parts = line.split(',').map(p => p.trim());
-          if (parts.length >= 7) {
-            return {
-              name: parts[0],
-              utilizationGpu: parts[1] !== '[N/A]' ? parseInt(parts[1], 10) : null,
-              memoryTotal: parts[2] !== '[N/A]' ? parseInt(parts[2], 10) : null,
-              memoryUsed: parts[3] !== '[N/A]' ? parseInt(parts[3], 10) : null,
-              temperatureGpu: parts[4] !== '[N/A]' ? parseInt(parts[4], 10) : null,
-              fanSpeed: parts[5] !== '[N/A]' ? parseInt(parts[5], 10) : null,
-              powerDraw: parts[6] !== '[N/A]' ? parseFloat(parts[6]) : null
-            };
-          }
-          return null;
-        }).filter(Boolean);
-        resolve(stats);
-      } catch (err) {
-        console.error('[gpu] nvidia-smi parse error:', err.message);
-        resolve(null);
-      }
-    });
-  });
+async function getNvidiaGpuStats() {
+  const stdout = await run('nvidia-smi', [
+    '--query-gpu=name,utilization.gpu,memory.total,memory.used,temperature.gpu,fan.speed,power.draw',
+    '--format=csv,noheader,nounits',
+  ]);
+  if (stdout === null) return null;
+  try {
+    return parseNvidiaSmi(stdout);
+  } catch (err) {
+    console.error('[gpu] nvidia-smi parse error:', err.message);
+    return null;
+  }
 }
 
 /**
- * Execute Windows PowerShell to query physical disk I/O rates (bytes read/written per sec).
- * Used as a fallback on Windows where si.disksIO() typically returns null.
+ * Query Windows performance counters for per-volume disk throughput.
+ * Used on Windows, where si.disksIO() typically returns null.
  */
-function getWindowsDiskIoStats() {
-  return new Promise((resolve) => {
-    exec('powershell -ExecutionPolicy Bypass -Command "Get-CimInstance Win32_PerfFormattedData_PerfDisk_PhysicalDisk -ErrorAction SilentlyContinue | Select-Object Name, DiskReadBytesPerSec, DiskWriteBytesPerSec | ConvertTo-Json"', (error, stdout, stderr) => {
-      if (error) {
-        return resolve(null);
-      }
-      try {
-        const stats = JSON.parse(stdout);
-        const list = Array.isArray(stats) ? stats : [stats];
-        
-        const result = {};
-        list.forEach(item => {
-          if (item && item.Name) {
-            const match = item.Name.match(/([A-Z]:)/i);
-            const driveLetter = match ? match[1].toUpperCase() : null;
-            if (driveLetter) {
-              result[driveLetter] = {
-                read: parseInt(item.DiskReadBytesPerSec, 10) || 0,
-                write: parseInt(item.DiskWriteBytesPerSec, 10) || 0
-              };
-            } else if (item.Name === '_Total') {
-              result['_Total'] = {
-                read: parseInt(item.DiskReadBytesPerSec, 10) || 0,
-                write: parseInt(item.DiskWriteBytesPerSec, 10) || 0
-              };
-            }
-          }
-        });
-        resolve(result);
-      } catch (err) {
-        resolve(null);
-      }
-    });
-  });
+async function getWindowsDiskIoStats() {
+  const stdout = await run('powershell', [
+    '-NoProfile',
+    '-Command',
+    'Get-CimInstance Win32_PerfFormattedData_PerfDisk_LogicalDisk -ErrorAction SilentlyContinue | ' +
+      'Select-Object Name, DiskReadBytesPerSec, DiskWriteBytesPerSec, DiskTransfersPerSec | ConvertTo-Json',
+  ]);
+  if (!stdout) return null;
+  try {
+    return parseWindowsDiskIo(stdout);
+  } catch (err) {
+    console.error('[disk] JSON parse error:', err.message);
+    return null;
+  }
 }
 
 /**
- * Execute Windows PowerShell script to fetch GPU stats (utilization and VRAM)
- * using CIM instances. This supports AMD and Intel graphics on Windows.
+ * Run gpu.ps1 to fetch GPU utilization and VRAM from Windows performance
+ * counters. This supports AMD and Intel graphics on Windows.
  */
-function getWindowsGpuStats() {
-  return new Promise((resolve) => {
-    exec('powershell -ExecutionPolicy Bypass -File gpu.ps1', { cwd: __dirname }, (error, stdout, stderr) => {
-      if (error) {
-        console.error('[gpu] PowerShell error:', error.message);
-        return resolve(null);
-      }
-      try {
-        const stats = JSON.parse(stdout);
-        resolve(stats);
-      } catch (err) {
-        console.error('[gpu] JSON parse error:', err.message);
-        resolve(null);
-      }
-    });
-  });
+async function getWindowsGpuStats() {
+  const stdout = await run('powershell', [
+    '-NoProfile',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    path.join(__dirname, 'gpu.ps1'),
+  ]);
+  if (!stdout) return null;
+  try {
+    return JSON.parse(stdout);
+  } catch (err) {
+    console.error('[gpu] JSON parse error:', err.message);
+    return null;
+  }
 }
 
 /**
  * Fast-tier metrics – collected every 2 seconds.
  */
 async function collectFastData() {
-  const currentLoad = calculateCpuLoad();
-  if (currentLoad && currentLoad.currentLoad !== undefined) {
-    latestCpuLoad = currentLoad.currentLoad;
-  }
+  const currentLoad = cpuLoadSampler.sample();
+  latestCpuLoad = currentLoad.currentLoad;
   const [mem, networkStats] = await Promise.all([
     safeCall(() => si.mem()),
     safeCall(() => si.networkStats()),
@@ -256,15 +199,16 @@ async function collectFastData() {
  * Medium-tier metrics – collected every 5 seconds.
  */
 async function collectMediumData() {
-  const [processes, fsSize, disksIO, graphics, cpuTemperature, cpuCurrentSpeed] = await Promise.all([
+  const isWindows = process.platform === 'win32';
+  const [processes, fsSize, graphics, cpuTemperature, cpuCurrentSpeed, siDisksIO, fsStats] = await Promise.all([
     safeCall(() => si.processes()),
     safeCall(() => si.fsSize()),
-    safeCall(() => si.disksIO()),
     safeCall(() => si.graphics()),
     safeCall(() => si.cpuTemperature()),
     safeCall(() => si.cpuCurrentSpeed()),
+    isWindows ? null : safeCall(() => si.disksIO()),
+    isWindows ? null : safeCall(() => si.fsStats()),
   ]);
-
   // Filter out remote display adapters / basic render drivers
   if (graphics && graphics.controllers) {
     graphics.controllers = graphics.controllers.filter(gpu => 
@@ -275,7 +219,7 @@ async function collectMediumData() {
   }
 
   // Augment GPU stats on Windows
-  if (process.platform === 'win32' && graphics && graphics.controllers) {
+  if (isWindows && graphics && graphics.controllers) {
     try {
       const nvGpuStats = await getNvidiaGpuStats();
       if (nvGpuStats && nvGpuStats.length > 0) {
@@ -297,6 +241,8 @@ async function collectMediumData() {
             if (match.powerDraw !== null && match.powerDraw !== undefined) {
               gpu.powerDraw = match.powerDraw;
             } else {
+              // nvidia-smi gave no reading: estimate from utilization and flag it.
+              gpu.powerDrawEstimated = true;
               const util = gpu.utilizationGpu || 0;
               const is4060 = gpu.model && gpu.model.includes('4060');
               const baseTdp = is4060 ? 115 : 150;
@@ -327,52 +273,41 @@ async function collectMediumData() {
     }
   }
 
+  // Windows often exposes no CPU temperature sensor. Fall back to a rough
+  // estimate from CPU load, flagged so the UI can label it as an estimate.
   let finalCpuTemperature = cpuTemperature;
   if (!finalCpuTemperature || finalCpuTemperature.main === null || finalCpuTemperature.main === -1) {
-    const load = latestCpuLoad || 5;
-    const mainTemp = Math.round(38 + (load * 0.4));
-    finalCpuTemperature = {
-      main: mainTemp,
-      cores: [mainTemp - 2, mainTemp + 1, mainTemp - 1, mainTemp + 2],
-      max: mainTemp + 3
+    const mainTemp = Math.round(38 + (latestCpuLoad || 5) * 0.4);
+    finalCpuTemperature = { main: mainTemp, cores: [], max: null, estimated: true };
+  }
+
+  // Disk throughput, normalised to bytes per second plus total IOPS.
+  let disksIO = null;
+  if (isWindows) {
+    const winDiskIo = await getWindowsDiskIoStats();
+    if (winDiskIo) {
+      (fsSize || []).forEach((disk) => {
+        const volume = disk.mount ? winDiskIo.volumes[disk.mount.toUpperCase()] : null;
+        disk.readSpeed = volume ? volume.read : 0;
+        disk.writeSpeed = volume ? volume.write : 0;
+      });
+      if (winDiskIo.total) {
+        disksIO = {
+          readBytesSec: winDiskIo.total.read,
+          writeBytesSec: winDiskIo.total.write,
+          iops: winDiskIo.total.iops,
+        };
+      }
+    }
+  } else if (fsStats || siDisksIO) {
+    disksIO = {
+      readBytesSec: fsStats ? fsStats.rx_sec : null,
+      writeBytesSec: fsStats ? fsStats.wx_sec : null,
+      iops: siDisksIO ? siDisksIO.tIO_sec : null,
     };
   }
 
-  // Augment Disk I/O stats on Windows
-  let finalDisksIO = disksIO;
-  if (process.platform === 'win32') {
-    try {
-      const winDiskIo = await getWindowsDiskIoStats();
-      if (winDiskIo) {
-        if (fsSize) {
-          fsSize.forEach(disk => {
-            if (disk.mount) {
-              const mountUpper = disk.mount.toUpperCase();
-              if (winDiskIo[mountUpper]) {
-                disk.readSpeed = winDiskIo[mountUpper].read;
-                disk.writeSpeed = winDiskIo[mountUpper].write;
-              } else {
-                disk.readSpeed = 0;
-                disk.writeSpeed = 0;
-              }
-            }
-          });
-        }
-        
-        if (winDiskIo['_Total']) {
-          finalDisksIO = {
-            rIO_sec: winDiskIo['_Total'].read / 512,
-            wIO_sec: winDiskIo['_Total'].write / 512,
-            tIO_sec: (winDiskIo['_Total'].read + winDiskIo['_Total'].write) / 512 / 100
-          };
-        }
-      }
-    } catch (diskErr) {
-      console.error('[disk] Augmentation error:', diskErr.message);
-    }
-  }
-
-  return { processes, fsSize, disksIO: finalDisksIO, graphics, cpuTemperature: finalCpuTemperature, cpuCurrentSpeed };
+  return { processes, fsSize, disksIO, graphics, cpuTemperature: finalCpuTemperature, cpuCurrentSpeed };
 }
 
 /**
@@ -395,40 +330,57 @@ async function collectSlowData() {
   return { battery, time, services };
 }
 
-// ─── Interval Runners ───────────────────────────────────────────────────────────
+// ─── Collection Tiers ───────────────────────────────────────────────────────────
 
-function startFastCollection() {
-  fastInterval = setInterval(async () => {
+/**
+ * Create a collection tier. Each run is scheduled only after the previous
+ * one finishes, so slow collections never overlap, and the tier pauses
+ * itself while no clients are connected.
+ */
+function createTier(type, intervalMs, collect) {
+  let timer = null;
+  let running = false;
+  let latest = null;
+
+  async function runOnce() {
+    timer = null;
+    if (shuttingDown || wss.clients.size === 0) return;
+    running = true;
     try {
-      const data = await collectFastData();
-      broadcast({ type: 'fast', data, timestamp: Date.now() });
+      const data = await collect();
+      latest = { type, data, timestamp: Date.now() };
+      broadcast(latest);
     } catch (err) {
-      console.error('[fast] Collection cycle error:', err.message);
+      console.error(`[${type}] Collection cycle error:`, err.message);
+    } finally {
+      running = false;
     }
-  }, FAST_INTERVAL_MS);
+    if (!shuttingDown && wss.clients.size > 0) {
+      timer = setTimeout(runOnce, intervalMs);
+    }
+  }
+
+  return {
+    /** Start collecting now unless a run is already in progress or scheduled. */
+    kick() {
+      if (!running && !timer) runOnce();
+    },
+    stop() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+    },
+    /** Most recent message, if it is still fresh enough to show a new client. */
+    latest() {
+      return latest && Date.now() - latest.timestamp < intervalMs * 2 ? latest : null;
+    },
+  };
 }
 
-function startMediumCollection() {
-  mediumInterval = setInterval(async () => {
-    try {
-      const data = await collectMediumData();
-      broadcast({ type: 'medium', data, timestamp: Date.now() });
-    } catch (err) {
-      console.error('[medium] Collection cycle error:', err.message);
-    }
-  }, MEDIUM_INTERVAL_MS);
-}
-
-function startSlowCollection() {
-  slowInterval = setInterval(async () => {
-    try {
-      const data = await collectSlowData();
-      broadcast({ type: 'slow', data, timestamp: Date.now() });
-    } catch (err) {
-      console.error('[slow] Collection cycle error:', err.message);
-    }
-  }, SLOW_INTERVAL_MS);
-}
+const tiers = [
+  createTier('fast', FAST_INTERVAL_MS, collectFastData),
+  createTier('medium', MEDIUM_INTERVAL_MS, collectMediumData),
+  createTier('slow', SLOW_INTERVAL_MS, collectSlowData),
+];
 
 // ─── WebSocket Connection Handling ──────────────────────────────────────────────
 
@@ -445,7 +397,20 @@ wss.on('connection', (ws, req) => {
     }
   }
 
-  ws.on('close', (code, reason) => {
+  // Show the newest readings straight away, then make sure collection is running.
+  tiers.forEach((tier) => {
+    const latest = tier.latest();
+    if (latest) {
+      try {
+        ws.send(JSON.stringify(latest));
+      } catch (err) {
+        console.error('[ws] Error sending cached data:', err.message);
+      }
+    }
+    tier.kick();
+  });
+
+  ws.on('close', (code) => {
     console.log(`[ws] Client disconnected (code=${code})`);
   });
 
@@ -463,10 +428,9 @@ wss.on('error', (err) => {
 function shutdown(signal) {
   console.log(`\n[server] ${signal} received – shutting down gracefully...`);
 
-  // Clear all collection intervals
-  if (fastInterval) clearInterval(fastInterval);
-  if (mediumInterval) clearInterval(mediumInterval);
-  if (slowInterval) clearInterval(slowInterval);
+  // Stop all collection tiers
+  shuttingDown = true;
+  tiers.forEach((tier) => tier.stop());
 
   // Close every open WebSocket connection
   wss.clients.forEach((client) => {
@@ -511,23 +475,31 @@ async function main() {
     // so we call them once now and discard the result.
     console.log('[server] Priming network & disk I/O stats...');
     await safeCall(() => si.networkStats());
-    await safeCall(() => si.disksIO());
+    if (process.platform !== 'win32') {
+      await safeCall(() => si.disksIO());
+      await safeCall(() => si.fsStats());
+    }
 
-    // Start the HTTP server
-    server.listen(PORT, () => {
+    server.on('error', (err) => {
+      if (err.code === 'EADDRINUSE') {
+        console.error(`[server] Port ${PORT} is already in use. Set PORT to a different value.`);
+      } else {
+        console.error('[server] HTTP server error:', err.message);
+      }
+      process.exit(1);
+    });
+
+    // Start the HTTP server. Collection starts when the first client connects.
+    server.listen(PORT, HOST, () => {
+      const shownHost = HOST === '0.0.0.0' || HOST === '::' ? 'localhost' : HOST;
       console.log('');
-      console.log('╔══════════════════════════════════════╗');
-      console.log('║     PC Live Dashboard v1.0           ║');
-      console.log(`║     http://localhost:${PORT}            ║`);
-      console.log('╚══════════════════════════════════════╝');
+      console.log(`  PC Live Dashboard v${version}`);
+      console.log(`  http://${shownHost}:${PORT}`);
       console.log('');
-
-      // Kick off the three collection tiers
-      startFastCollection();
-      startMediumCollection();
-      startSlowCollection();
-
-      console.log('[server] Data collection started.');
+      if (HOST !== '127.0.0.1' && HOST !== 'localhost' && HOST !== '::1') {
+        console.log('[server] Listening on the network with no authentication. Use a trusted network only.');
+      }
+      console.log('[server] Collection runs while a browser is connected:');
       console.log(`  ├─ Fast   : every ${FAST_INTERVAL_MS / 1000}s  (CPU, RAM, Network)`);
       console.log(`  ├─ Medium : every ${MEDIUM_INTERVAL_MS / 1000}s  (Processes, Disks, GPU, CPU Temps & Speed)`);
       console.log(`  └─ Slow   : every ${SLOW_INTERVAL_MS / 1000}s (Battery, Uptime, Services)`);

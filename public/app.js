@@ -10,7 +10,7 @@
     // CONFIGURATION
     // ═══════════════════════════════════════════════════════════════
     const CONFIG = {
-        WS_URL: `ws://${window.location.host}`,
+        WS_URL: `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`,
         RECONNECT_DELAY: 2000,
         MAX_RECONNECT_DELAY: 30000,
         HISTORY_LENGTH: 60,
@@ -372,12 +372,12 @@
         }
 
         container.innerHTML = groups.map(g => `
-            <div class="group-list-item" data-group-id="${g.id}">
+            <div class="group-list-item" data-group-id="${escapeHtml(g.id)}">
                 <div class="group-info">
-                    <span>📁 ${g.name}</span>
+                    <span>📁 ${escapeHtml(g.name)}</span>
                     <span class="group-card-count">${g.cards.length} cards</span>
                 </div>
-                <button data-delete-group="${g.id}" title="Delete group">✕</button>
+                <button data-delete-group="${escapeHtml(g.id)}" title="Delete group">✕</button>
             </div>
         `).join('');
 
@@ -551,7 +551,7 @@
         groupEl.id = id;
         groupEl.innerHTML = `
             <div class="card-group-header">
-                <div class="group-name">📁 ${name}</div>
+                <div class="group-name">📁 ${escapeHtml(name)}</div>
                 <div class="group-actions">
                     <button class="group-collapse-btn" title="Collapse">−</button>
                 </div>
@@ -824,12 +824,7 @@
                 const draggingRect = dragging.getBoundingClientRect();
                 const isSameRow = Math.abs(bounding.top - draggingRect.top) < 100;
 
-                let insertAfter = false;
-                if (isSameRow) {
-                    insertAfter = mouseX > cardCenterX;
-                } else {
-                    insertAfter = mouseY > cardCenterY;
-                }
+                const insertAfter = isSameRow ? mouseX > cardCenterX : mouseY > cardCenterY;
 
                 if (parent.classList.contains('card-group-body')) {
                     stripCardSizes(dragging);
@@ -1206,7 +1201,6 @@
     // ═══════════════════════════════════════════════════════════════
     function handleStaticData(data) {
         state.staticData = data;
-        const DC = window.DashCharts;
 
         // System bar
         if (data.osInfo) {
@@ -1217,7 +1211,7 @@
 
         // CPU info
         if (data.cpu) {
-            setText('val-cpu-model', `${data.cpu.manufacturer} ${data.cpu.brand}` || '—');
+            setText('val-cpu-model', `${data.cpu.manufacturer || ''} ${data.cpu.brand || ''}`.trim() || '—');
             setText('cpu-cores', data.cpu.physicalCores || '—');
             setText('cpu-threads', data.cpu.cores || '—');
         }
@@ -1229,7 +1223,7 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // FAST DATA (every 1 second)
+    // FAST DATA (every 2 seconds)
     // ═══════════════════════════════════════════════════════════════
     function handleFastData(data) {
         const DC = window.DashCharts;
@@ -1265,8 +1259,7 @@
 
         // ── CPU Temperature ──
         if (data.cpuTemperature) {
-            const temp = data.cpuTemperature.main;
-            setText('cpu-temp', temp !== null && temp !== -1 ? `${Math.round(temp)} °C` : 'N/A');
+            setCpuTemp(data.cpuTemperature);
             updateTemperatures(data.cpuTemperature, 'cpu');
         }
 
@@ -1330,7 +1323,7 @@
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // MEDIUM DATA (every 3 seconds)
+    // MEDIUM DATA (every 5 seconds)
     // ═══════════════════════════════════════════════════════════════
     function handleMediumData(data) {
         const DC = window.DashCharts;
@@ -1352,9 +1345,10 @@
 
         // ── Disk I/O ──
         if (data.disksIO) {
-            setText('disk-read-speed', data.disksIO.rIO_sec !== null ? DC.formatSpeed(data.disksIO.rIO_sec * 512) : '—');
-            setText('disk-write-speed', data.disksIO.wIO_sec !== null ? DC.formatSpeed(data.disksIO.wIO_sec * 512) : '—');
-            setText('disk-io-badge', data.disksIO.tIO_sec !== null ? `${Math.round(data.disksIO.tIO_sec)} IOPS` : '—');
+            const io = data.disksIO;
+            setText('disk-read-speed', io.readBytesSec != null ? DC.formatSpeed(io.readBytesSec) : '—');
+            setText('disk-write-speed', io.writeBytesSec != null ? DC.formatSpeed(io.writeBytesSec) : '—');
+            setText('disk-io-badge', io.iops != null ? `${Math.round(io.iops)} IOPS` : '—');
         }
 
         // ── GPU ──
@@ -1370,14 +1364,13 @@
         // ── CPU Temperature (moved to medium tier for performance) ──
         if (data.cpuTemperature) {
             state.cpuTemperature = data.cpuTemperature;
-            const temp = data.cpuTemperature.main;
-            setText('cpu-temp', temp !== null && temp !== -1 ? `${Math.round(temp)} °C` : 'N/A');
+            setCpuTemp(data.cpuTemperature);
         }
         updateTemperatures();
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // SLOW DATA (every 10 seconds)
+    // SLOW DATA (every 15 seconds)
     // ═══════════════════════════════════════════════════════════════
     function handleSlowData(data) {
         const DC = window.DashCharts;
@@ -1475,13 +1468,13 @@
             container.innerHTML = controllers.map((gpu, i) => `
                 <div class="card gpu-card" id="gpu-card-${i}">
                     <div class="gpu-card-header">
-                        <span class="gpu-name">${gpu.vendor || ''} ${gpu.model || 'Unknown GPU'}</span>
+                        <span class="gpu-name">${escapeHtml(gpu.vendor || '')} ${escapeHtml(gpu.model || 'Unknown GPU')}</span>
                         <span class="badge ${gpu.utilizationGpu != null ? 'badge-green' : 'badge-muted'}">${gpu.utilizationGpu != null ? `${Math.round(gpu.utilizationGpu)}%` : 'N/A'}</span>
                     </div>
                     <div class="gpu-card-body">
                         <div class="gpu-stats-row">
                             <div class="gauge-container gauge-sm">
-                                <div class="gauge-ring gauge-green" id="gpu-gauge-${i}" style="--gauge-percent: ${(gpu.utilizationGpu || 0) * 3.6}deg">
+                                <div class="gauge-ring gauge-green" id="gpu-gauge-${i}" style="--gauge-percent: ${(Number(gpu.utilizationGpu) || 0) * 3.6}deg">
                                     <div class="gauge-inner">
                                         <span class="gauge-value mono" id="gpu-gauge-val-${i}">${Math.round(gpu.utilizationGpu || 0)}</span>
                                         <span class="gauge-unit">%</span>
@@ -1492,7 +1485,7 @@
                             <div class="stat-grid stat-grid-2">
                                 <div class="stat-item">
                                     <span class="stat-label">VRAM</span>
-                                    <span class="stat-value mono" id="gpu-vram-${i}">${gpu.memoryUsed != null ? `${gpu.memoryUsed}/${gpu.memoryTotal} MB` : 'N/A'}</span>
+                                    <span class="stat-value mono" id="gpu-vram-${i}">${escapeHtml(formatVram(gpu))}</span>
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">TEMP</span>
@@ -1500,11 +1493,11 @@
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">FAN</span>
-                                    <span class="stat-value mono" id="gpu-fan-${i}">${gpu.fanSpeed != null ? `${gpu.fanSpeed}%` : 'N/A'}</span>
+                                    <span class="stat-value mono" id="gpu-fan-${i}">${escapeHtml(formatFan(gpu))}</span>
                                 </div>
                                 <div class="stat-item">
                                     <span class="stat-label">POWER</span>
-                                    <span class="stat-value mono" id="gpu-power-${i}">${gpu.powerDraw != null ? `${gpu.powerDraw} W` : 'N/A'}</span>
+                                    <span class="stat-value mono" id="gpu-power-${i}">${escapeHtml(formatPower(gpu))}</span>
                                 </div>
                             </div>
                         </div>
@@ -1549,10 +1542,10 @@
             controllers.forEach((gpu, i) => {
                 const util = Math.round(gpu.utilizationGpu || 0);
                 updateGauge(`gpu-gauge-${i}`, `gpu-gauge-val-${i}`, util, 'green');
-                setText(`gpu-vram-${i}`, gpu.memoryUsed != null ? `${gpu.memoryUsed}/${gpu.memoryTotal} MB` : 'N/A');
+                setText(`gpu-vram-${i}`, formatVram(gpu));
                 setText(`gpu-temp-${i}`, gpu.temperatureGpu != null ? `${Math.round(gpu.temperatureGpu)} °C` : 'N/A');
-                setText(`gpu-fan-${i}`, gpu.fanSpeed != null ? `${gpu.fanSpeed}%` : 'N/A');
-                setText(`gpu-power-${i}`, gpu.powerDraw != null ? `${gpu.powerDraw} W` : 'N/A');
+                setText(`gpu-fan-${i}`, formatFan(gpu));
+                setText(`gpu-power-${i}`, formatPower(gpu));
 
                 // Update GPU utilization chart
                 if (state.gpuCharts[i] && state.gpuBuffers[i]) {
@@ -1593,25 +1586,25 @@
         container.innerHTML = nonInternalIfaces.map(iface => `
             <div class="card net-iface-card" id="net-iface-${sanitizeId(iface.iface)}">
                 <div class="net-iface-header">
-                    <span class="net-iface-name">${iface.ifaceName || iface.iface}</span>
-                    <span class="badge ${iface.operstate === 'up' ? 'badge-running' : 'badge-stopped'}">${iface.operstate || 'unknown'}</span>
+                    <span class="net-iface-name">${escapeHtml(iface.ifaceName || iface.iface)}</span>
+                    <span class="badge ${iface.operstate === 'up' ? 'badge-running' : 'badge-stopped'}">${escapeHtml(iface.operstate || 'unknown')}</span>
                 </div>
                 <div class="net-iface-details">
                     <div class="stat-item-inline">
                         <span class="stat-label">TYPE</span>
-                        <span class="stat-value mono">${iface.type || '—'}</span>
+                        <span class="stat-value mono">${escapeHtml(iface.type || '—')}</span>
                     </div>
                     <div class="stat-item-inline">
                         <span class="stat-label">IP</span>
-                        <span class="stat-value mono">${iface.ip4 || '—'}</span>
+                        <span class="stat-value mono">${escapeHtml(iface.ip4 || '—')}</span>
                     </div>
                     <div class="stat-item-inline">
                         <span class="stat-label">MAC</span>
-                        <span class="stat-value mono">${iface.mac || '—'}</span>
+                        <span class="stat-value mono">${escapeHtml(iface.mac || '—')}</span>
                     </div>
                     <div class="stat-item-inline">
                         <span class="stat-label">SPEED</span>
-                        <span class="stat-value mono">${iface.speed ? `${iface.speed} Mbps` : '—'}</span>
+                        <span class="stat-value mono">${iface.speed ? `${escapeHtml(iface.speed)} Mbps` : '—'}</span>
                     </div>
                     <div class="stat-item-inline">
                         <span class="stat-label">DL</span>
@@ -1660,7 +1653,7 @@
             return `
                 <div class="disk-item">
                     <div class="disk-item-header">
-                        <span class="disk-mount mono">${disk.mount}</span>
+                        <span class="disk-mount mono">${escapeHtml(disk.mount)}</span>
                         <span class="disk-usage-text mono ${colorClass === 'danger' ? 'text-red' : colorClass === 'warning' ? 'text-amber' : 'text-cyan'}">${usePercent}%</span>
                     </div>
                     <div class="progress-bar progress-${colorClass === 'danger' ? 'red' : colorClass === 'warning' ? 'amber' : 'cyan'}">
@@ -1674,7 +1667,7 @@
                         </span>
                     </div>
                     <div class="disk-item-footer" style="margin-top: 2px;">
-                        <span class="text-muted" style="font-size: 0.72rem;">${disk.fs || ''} · ${disk.type || ''}</span>
+                        <span class="text-muted" style="font-size: 0.72rem;">${escapeHtml(disk.fs || '')} · ${escapeHtml(disk.type || '')}</span>
                     </div>
                 </div>
             `;
@@ -1696,7 +1689,7 @@
         if (state.cpuTemperature) {
             const cpu = state.cpuTemperature;
             if (cpu.main !== null && cpu.main !== -1) {
-                items.push({ label: 'CPU Package', temp: cpu.main, icon: '🔲' });
+                items.push({ label: cpu.estimated ? 'CPU Package (est.)' : 'CPU Package', temp: cpu.main, icon: '🔲' });
             }
             if (cpu.cores && cpu.cores.length > 0) {
                 cpu.cores.forEach((temp, i) => {
@@ -1705,7 +1698,7 @@
                     }
                 });
             }
-            if (cpu.max !== null && cpu.max !== -1) {
+            if (cpu.max != null && cpu.max !== -1) {
                 items.push({ label: 'CPU Max', temp: cpu.max, icon: '🔥' });
             }
         }
@@ -1734,7 +1727,7 @@
             return `
                 <div class="temp-item">
                     <div class="temp-item-header">
-                        <span>${item.icon} ${item.label}</span>
+                        <span>${item.icon} ${escapeHtml(item.label)}</span>
                         <span class="mono ${colorClass}">${Math.round(item.temp)}°C</span>
                     </div>
                     <div class="progress-bar progress-bar-thin progress-${barColor}">
@@ -1755,25 +1748,17 @@
 
         let items = [];
 
-        // 1. CPU Fan (Estimated RPM based on CPU temperature)
-        if (state.cpuTemperature && state.cpuTemperature.main != null) {
+        // 1. CPU Fan. No sensor is read: the RPM is estimated from CPU temperature.
+        if (state.cpuTemperature && state.cpuTemperature.main != null && state.cpuTemperature.main !== -1) {
             const temp = state.cpuTemperature.main;
             const rpm = Math.round(600 + Math.max(0, temp - 38) * 33.3);
             const percent = Math.min(Math.round(((rpm - 600) / 1400) * 100), 100);
-            items.push({ 
-                label: 'CPU Fan', 
-                rpm: rpm, 
-                percent: Math.max(0, percent), 
-                icon: '🌀', 
-                color: 'cyan' 
-            });
-        } else {
-            items.push({ 
-                label: 'CPU Fan', 
-                rpm: 650, 
-                percent: 10, 
-                icon: '🌀', 
-                color: 'cyan' 
+            items.push({
+                label: 'CPU Fan (est.)',
+                rpm: rpm,
+                percent: Math.max(0, percent),
+                icon: '🌀',
+                color: 'cyan'
             });
         }
 
@@ -1784,7 +1769,9 @@
                     ? gpu.model.replace(/NVIDIA/i, '').replace(/GeForce/i, '').replace(/Graphics/i, '').trim() 
                     : `GPU ${i}`;
                 
-                const fanPercent = gpu.fanSpeed != null ? gpu.fanSpeed : 0;
+                // Skip GPUs that report no fan reading. RPM is estimated from the fan percentage.
+                if (gpu.fanSpeed == null) return;
+                const fanPercent = Number(gpu.fanSpeed) || 0;
                 const rpm = Math.round((fanPercent / 100) * 3000);
                 
                 items.push({ 
@@ -1807,8 +1794,8 @@
             return `
                 <div class="temp-item">
                     <div class="temp-item-header">
-                        <span>${item.icon} ${item.label}</span>
-                        <span class="mono ${colorClass}">${item.rpm} RPM <span class="text-muted" style="font-size: 0.72rem; margin-left: 4px;">(${item.percent}%)</span></span>
+                        <span>${item.icon} ${escapeHtml(item.label)}</span>
+                        <span class="mono ${colorClass}">≈ ${item.rpm} RPM <span class="text-muted" style="font-size: 0.72rem; margin-left: 4px;">(${item.percent}%)</span></span>
                     </div>
                     <div class="progress-bar progress-bar-thin progress-${item.color}">
                         <div class="progress-fill" style="width: ${item.percent}%"></div>
@@ -1896,12 +1883,12 @@
             const memClass = proc.mem >= 50 ? 'text-red' : proc.mem >= 20 ? 'text-amber' : '';
             return `
                 <tr>
-                    <td class="mono">${proc.pid}</td>
+                    <td class="mono">${escapeHtml(proc.pid)}</td>
                     <td class="process-name" title="${escapeHtml(proc.command || proc.name || '')}">${escapeHtml(proc.name || '—')}</td>
-                    <td class="mono ${cpuClass}">${(proc.cpu || 0).toFixed(1)}</td>
-                    <td class="mono ${memClass}">${(proc.mem || 0).toFixed(1)}</td>
+                    <td class="mono ${cpuClass}">${(Number(proc.cpu) || 0).toFixed(1)}</td>
+                    <td class="mono ${memClass}">${(Number(proc.mem) || 0).toFixed(1)}</td>
                     <td class="mono">${DC.formatBytes((proc.memRss || 0) * 1024)}</td>
-                    <td><span class="badge badge-sm ${getStateBadgeClass(proc.state)}">${proc.state || '—'}</span></td>
+                    <td><span class="badge badge-sm ${getStateBadgeClass(proc.state)}">${escapeHtml(proc.state || '—')}</span></td>
                     <td class="text-muted">${escapeHtml(proc.user || '—')}</td>
                 </tr>
             `;
@@ -1932,9 +1919,9 @@
                 <div class="app-icon">${getAppIcon(app.name)}</div>
                 <div class="app-info">
                     <span class="app-name">${escapeHtml(app.name)}</span>
-                    <span class="app-details text-muted">PID ${app.pid} · ${DC.formatBytes((app.memRss || 0) * 1024)}</span>
+                    <span class="app-details text-muted">PID ${escapeHtml(app.pid)} · ${DC.formatBytes((app.memRss || 0) * 1024)}</span>
                 </div>
-                <span class="app-cpu mono ${app.cpu >= 20 ? 'text-amber' : ''}">${(app.cpu || 0).toFixed(1)}%</span>
+                <span class="app-cpu mono ${app.cpu >= 20 ? 'text-amber' : ''}">${(Number(app.cpu) || 0).toFixed(1)}%</span>
             </div>
         `).join('');
     }
@@ -1973,9 +1960,9 @@
             <tr>
                 <td class="mono">${escapeHtml(svc.name || '—')}</td>
                 <td><span class="badge badge-sm ${svc.running ? 'badge-running' : 'badge-stopped'}">${svc.running ? 'Running' : 'Stopped'}</span></td>
-                <td class="text-muted">${svc.startmode || '—'}</td>
-                <td class="mono">${svc.pcpu !== undefined ? svc.pcpu.toFixed(1) : '—'}</td>
-                <td class="mono">${svc.pmem !== undefined ? svc.pmem.toFixed(1) : '—'}</td>
+                <td class="text-muted">${escapeHtml(svc.startmode || '—')}</td>
+                <td class="mono">${typeof svc.pcpu === 'number' ? svc.pcpu.toFixed(1) : '—'}</td>
+                <td class="mono">${typeof svc.pmem === 'number' ? svc.pmem.toFixed(1) : '—'}</td>
             </tr>
         `).join('');
     }
@@ -1989,10 +1976,36 @@
         if (el) el.textContent = text;
     }
 
+    // Escapes text for use in HTML content and in quoted attribute values.
     function escapeHtml(str) {
-        const div = document.createElement('div');
-        div.textContent = str;
-        return div.innerHTML;
+        return String(str ?? '').replace(/[&<>"'`]/g, (ch) => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;', '`': '&#96;'
+        }[ch]));
+    }
+
+    function formatVram(gpu) {
+        return gpu.memoryUsed != null ? `${gpu.memoryUsed}/${gpu.memoryTotal} MB` : 'N/A';
+    }
+
+    function formatFan(gpu) {
+        return gpu.fanSpeed != null ? `${gpu.fanSpeed}%` : 'N/A';
+    }
+
+    function formatPower(gpu) {
+        if (gpu.powerDraw == null) return 'N/A';
+        return gpu.powerDrawEstimated ? `≈ ${gpu.powerDraw} W est.` : `${gpu.powerDraw} W`;
+    }
+
+    // Shows the CPU temperature and marks the label when the server estimated it.
+    function setCpuTemp(cpuTemp) {
+        const el = $('cpu-temp');
+        if (!el) return;
+        const temp = cpuTemp.main;
+        const hasTemp = temp != null && temp !== -1;
+        const estimated = hasTemp && cpuTemp.estimated;
+        el.textContent = hasTemp ? `${estimated ? '≈ ' : ''}${Math.round(temp)} °C` : 'N/A';
+        const label = el.previousElementSibling;
+        if (label) label.textContent = estimated ? 'TEMP (EST.)' : 'TEMP';
     }
 
     function sanitizeId(str) {
@@ -2098,7 +2111,6 @@
         const rowGap = 16;
         const items = grid.querySelectorAll(':scope > .card, :scope > .card-group');
         items.forEach(item => {
-            const oldSpan = item.style.gridRowEnd;
             item.style.gridRowEnd = '';
             const height = item.getBoundingClientRect().height;
             const rowSpan = Math.ceil((height + rowGap) / (rowHeight + rowGap));
